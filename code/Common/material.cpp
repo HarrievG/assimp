@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -47,10 +46,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/material.h>
 
 // -------------------------------------------------------------------------------
-const char* TextureTypeToString(aiTextureType in)
-{
-    switch (in)
-    {
+const char *aiTextureTypeToString(aiTextureType in) {
+    switch (in) {
     case aiTextureType_NONE:
         return "n/a";
     case aiTextureType_DIFFUSE:
@@ -87,6 +84,24 @@ const char* TextureTypeToString(aiTextureType in)
         return "DiffuseRoughness";
     case aiTextureType_AMBIENT_OCCLUSION:
         return "AmbientOcclusion";
+    case aiTextureType_SHEEN:
+        return "Sheen";
+    case aiTextureType_CLEARCOAT:
+        return "Clearcoat";
+    case aiTextureType_TRANSMISSION:
+        return "Transmission";
+    case aiTextureType_MAYA_BASE:
+        return "MayaBase";
+    case aiTextureType_MAYA_SPECULAR:
+        return "MayaSpecular";
+    case aiTextureType_MAYA_SPECULAR_COLOR:
+        return "MayaSpecularColor";
+    case aiTextureType_MAYA_SPECULAR_ROUGHNESS:
+        return "MayaSpecularRoughness";
+    case aiTextureType_ANISOTROPY:
+        return "Anisotropy";
+    case aiTextureType_GLTF_METALLIC_ROUGHNESS:
+        return "glTFMetallicRoughness";
     case aiTextureType_UNKNOWN:
         return "Unknown";
     default:

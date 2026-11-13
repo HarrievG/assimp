@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -40,7 +40,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #pragma once
 
-#include <memory>
+#ifndef ASSIMP_BUILD_NO_EXPORT
+#ifndef ASSIMP_BUILD_NO_3MF_EXPORTER
+
 #include <sstream>
 #include <vector>
 #include <assimp/vector3.h>
@@ -58,16 +60,13 @@ class IOStream;
 
 namespace D3MF {
 
-#ifndef ASSIMP_BUILD_NO_EXPORT
-#ifndef ASSIMP_BUILD_NO_3MF_EXPORTER
-
 struct OpcPackageRelationship;
 
 class D3MFExporter {
 public:
     D3MFExporter( const char* pFile, const aiScene* pScene );
     ~D3MFExporter();
-    bool validate();
+    bool validate() const;
     bool exportArchive( const char *file );
     bool exportContentTypes();
     bool exportRelations();
@@ -91,8 +90,8 @@ protected:
 
 private:
     std::string mArchiveName;
-    zip_t *m_zipArchive;
-    const aiScene *mScene;
+    zip_t *mZipArchive{nullptr};
+    const aiScene *mScene{nullptr};
     std::ostringstream mModelOutput;
     std::ostringstream mRelOutput;
     std::ostringstream mContentOutput;
@@ -100,9 +99,10 @@ private:
     std::vector<OpcPackageRelationship*> mRelations;
 };
 
+} // Namespace D3MF
+} // Namespace Assimp
+
 #endif // ASSIMP_BUILD_NO_3MF_EXPORTER
 #endif // ASSIMP_BUILD_NO_EXPORT
 
-} // Namespace D3MF
-} // Namespace Assimp
 

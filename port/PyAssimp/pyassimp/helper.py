@@ -5,12 +5,9 @@ Some fancy helper functions.
 """
 
 import os
+import platform
 import ctypes
 import operator
-
-from distutils.sysconfig import get_python_lib
-import re
-import sys
 
 try: import numpy
 except ImportError: numpy = None
@@ -27,18 +24,15 @@ if os.name=='posix':
     additional_dirs.append('./')
     additional_dirs.append('/usr/lib/')
     additional_dirs.append('/usr/lib/x86_64-linux-gnu/')
+    additional_dirs.append('/usr/lib/aarch64-linux-gnu/')
     additional_dirs.append('/usr/local/lib/')
 
     if 'LD_LIBRARY_PATH' in os.environ:
         additional_dirs.extend([item for item in os.environ['LD_LIBRARY_PATH'].split(':') if item])
-
-    # check if running from anaconda.
-    if "conda" or "continuum" in sys.version.lower():
-      cur_path = get_python_lib()
-      pattern = re.compile('.*\/lib\/')
-      conda_lib = pattern.match(cur_path).group()
-      logger.info("Adding Anaconda lib path:"+ conda_lib)
-      additional_dirs.append(conda_lib)
+    
+    if platform.system() == 'Darwin':
+        if 'DYLD_LIBRARY_PATH' in os.environ:
+            additional_dirs.extend([item for item in os.environ['DYLD_LIBRARY_PATH'].split(':') if item])
 
     # note - this won't catch libassimp.so.N.n, but
     # currently there's always a symlink called

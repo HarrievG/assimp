@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -44,22 +44,23 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef ASSIMP_BUILD_NO_MDC_IMPORTER
 
 // internal headers
-#include "AssetLib/MDC/MDCLoader.h"
+#include "MDCLoader.h"
 #include "AssetLib/MD3/MD3FileData.h"
-#include "AssetLib/MDC/MDCNormalTable.h" // shouldn't be included by other units
+#include "MDCNormalTable.h" // shouldn't be included by other units
 
 #include <assimp/importerdesc.h>
 #include <assimp/scene.h>
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/IOSystem.hpp>
 #include <assimp/Importer.hpp>
+#include <assimp/StringUtils.h>
 
 #include <memory>
 
 using namespace Assimp;
 using namespace Assimp::MDC;
 
-static const aiImporterDesc desc = {
+static constexpr aiImporterDesc desc = {
     "Return To Castle Wolfenstein Mesh Importer",
     "",
     "",
@@ -103,26 +104,10 @@ MDCImporter::MDCImporter() :
 }
 
 // ------------------------------------------------------------------------------------------------
-// Destructor, private as well
-MDCImporter::~MDCImporter() {
-    // empty
-}
-
-// ------------------------------------------------------------------------------------------------
 // Returns whether the class can handle the format of the given file.
-bool MDCImporter::CanRead(const std::string &pFile, IOSystem *pIOHandler, bool checkSig) const {
-    const std::string extension = GetExtension(pFile);
-    if (extension == "mdc") {
-        return true;
-    }
-
-    // if check for extension is not enough, check for the magic tokens
-    if (!extension.length() || checkSig) {
-        uint32_t tokens[1];
-        tokens[0] = AI_MDC_MAGIC_NUMBER_LE;
-        return CheckMagicToken(pIOHandler, pFile, tokens, 1);
-    }
-    return false;
+bool MDCImporter::CanRead(const std::string &pFile, IOSystem *pIOHandler, bool /*checkSig*/) const {
+    static constexpr uint32_t tokens[] = { AI_MDC_MAGIC_NUMBER_LE };
+    return CheckMagicToken(pIOHandler, pFile, tokens, AI_COUNT_OF(tokens));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -143,24 +128,16 @@ void MDCImporter::ValidateHeader() {
 
     if (pcHeader->ulIdent != AI_MDC_MAGIC_NUMBER_BE &&
             pcHeader->ulIdent != AI_MDC_MAGIC_NUMBER_LE) {
-        char szBuffer[5];
-        szBuffer[0] = ((char *)&pcHeader->ulIdent)[0];
-        szBuffer[1] = ((char *)&pcHeader->ulIdent)[1];
-        szBuffer[2] = ((char *)&pcHeader->ulIdent)[2];
-        szBuffer[3] = ((char *)&pcHeader->ulIdent)[3];
-        szBuffer[4] = '\0';
-
-        throw DeadlyImportError("Invalid MDC magic word: should be IDPC, the "
-                                "magic word found is " +
-                                std::string(szBuffer));
+        throw DeadlyImportError("Invalid MDC magic word: expected IDPC, found ",
+                                ai_str_toprintable((char *)&pcHeader->ulIdent, 4));
     }
 
     if (pcHeader->ulVersion != AI_MDC_VERSION) {
         ASSIMP_LOG_WARN("Unsupported MDC file version (2 (AI_MDC_VERSION) was expected)");
     }
 
-    if (pcHeader->ulOffsetBorderFrames + pcHeader->ulNumFrames * sizeof(MDC::Frame) > this->fileSize ||
-            pcHeader->ulOffsetSurfaces + pcHeader->ulNumSurfaces * sizeof(MDC::Surface) > this->fileSize) {
+    if (pcHeader->ulOffsetBorderFrames + static_cast<uint64_t>(pcHeader->ulNumFrames) * sizeof(MDC::Frame) > this->fileSize ||
+            pcHeader->ulOffsetSurfaces + static_cast<uint64_t>(pcHeader->ulNumSurfaces) * sizeof(MDC::Surface) > this->fileSize) {
         throw DeadlyImportError("Some of the offset values in the MDC header are invalid "
                                 "and point to something behind the file.");
     }
@@ -183,19 +160,21 @@ void MDCImporter::ValidateSurfaceHeader(BE_NCONST MDC::Surface *pcSurf) {
     AI_SWAP4(pcSurf->ulOffsetTexCoords);
     AI_SWAP4(pcSurf->ulOffsetBaseVerts);
     AI_SWAP4(pcSurf->ulOffsetCompVerts);
+    AI_SWAP4(pcSurf->ulOffsetShaders);
     AI_SWAP4(pcSurf->ulOffsetFrameBaseFrames);
     AI_SWAP4(pcSurf->ulOffsetFrameCompFrames);
     AI_SWAP4(pcSurf->ulOffsetEnd);
 
     const unsigned int iMax = this->fileSize - (unsigned int)((int8_t *)pcSurf - (int8_t *)pcHeader);
 
-    if (pcSurf->ulOffsetBaseVerts + pcSurf->ulNumVertices * sizeof(MDC::BaseVertex) > iMax ||
-            (pcSurf->ulNumCompFrames && pcSurf->ulOffsetCompVerts + pcSurf->ulNumVertices * sizeof(MDC::CompressedVertex) > iMax) ||
-            pcSurf->ulOffsetTriangles + pcSurf->ulNumTriangles * sizeof(MDC::Triangle) > iMax ||
-            pcSurf->ulOffsetTexCoords + pcSurf->ulNumVertices * sizeof(MDC::TexturCoord) > iMax ||
-            pcSurf->ulOffsetShaders + pcSurf->ulNumShaders * sizeof(MDC::Shader) > iMax ||
-            pcSurf->ulOffsetFrameBaseFrames + pcSurf->ulNumBaseFrames * 2 > iMax ||
-            (pcSurf->ulNumCompFrames && pcSurf->ulOffsetFrameCompFrames + pcSurf->ulNumCompFrames * 2 > iMax)) {
+    if (pcSurf->ulOffsetBaseVerts + static_cast<uint64_t>(pcSurf->ulNumVertices) * sizeof(MDC::BaseVertex) > iMax ||
+            (pcSurf->ulNumCompFrames && pcSurf->ulOffsetCompVerts + static_cast<uint64_t>(pcSurf->ulNumVertices) * sizeof(MDC::CompressedVertex) > iMax) ||
+            pcSurf->ulOffsetTriangles + static_cast<uint64_t>(pcSurf->ulNumTriangles) * sizeof(MDC::Triangle) > iMax ||
+            pcSurf->ulOffsetTexCoords + static_cast<uint64_t>(pcSurf->ulNumVertices) * sizeof(MDC::TexturCoord) > iMax ||
+            pcSurf->ulOffsetShaders + static_cast<uint64_t>(pcSurf->ulNumShaders) * sizeof(MDC::Shader) > iMax ||
+            pcSurf->ulOffsetFrameBaseFrames + static_cast<uint64_t>(pcSurf->ulNumBaseFrames) * sizeof(int16_t) > iMax ||
+            (pcSurf->ulNumCompFrames && pcSurf->ulOffsetFrameCompFrames + static_cast<uint64_t>(pcSurf->ulNumCompFrames) * sizeof(int16_t) > iMax) ||
+            pcSurf->ulOffsetEnd > iMax) {
         throw DeadlyImportError("Some of the offset values in the MDC surface header "
                                 "are invalid and point somewhere behind the file.");
     }
@@ -218,7 +197,7 @@ void MDCImporter::InternReadFile(
     std::unique_ptr<IOStream> file(pIOHandler->Open(pFile));
 
     // Check whether we can read from the file
-    if (file.get() == nullptr) {
+    if (file == nullptr) {
         throw DeadlyImportError("Failed to open MDC file ", pFile, ".");
     }
 
@@ -288,13 +267,13 @@ void MDCImporter::InternReadFile(
             pcMesh->mMaterialIndex = (unsigned int)aszShaders.size();
 
             // create a new shader
-            aszShaders.push_back(std::string(pcShader->ucName,
-                    ::strnlen(pcShader->ucName, sizeof(pcShader->ucName))));
+            aszShaders.emplace_back(pcShader->ucName,
+                    ::strnlen(pcShader->ucName, sizeof(pcShader->ucName)));
         }
         // need to create a default material
         else if (UINT_MAX == iDefaultMatIndex) {
             pcMesh->mMaterialIndex = iDefaultMatIndex = (unsigned int)aszShaders.size();
-            aszShaders.push_back(std::string());
+            aszShaders.emplace_back();
         }
         // otherwise assign a reference to the default material
         else
@@ -347,6 +326,15 @@ void MDCImporter::InternReadFile(
 
 #endif
 
+        // boundary check for pcVerts
+        auto surfStart = reinterpret_cast<const uint8_t*>(pcSurface);
+        const uint8_t* surfEnd = surfStart + pcSurface->ulOffsetEnd;
+        auto vertBufStart = reinterpret_cast<const uint8_t*>(pcVerts);
+        const size_t needVertBytes = sizeof(MDC::BaseVertex) * pcSurface->ulNumVertices;
+        if (vertBufStart < surfStart || vertBufStart + needVertBytes > surfEnd) {
+            throw DeadlyImportError("MDCImporter: pcVerts points outside of surface block.");
+        }
+
         const MDC::CompressedVertex *pcCVerts = nullptr;
         int16_t *mdcCompVert = nullptr;
 
@@ -358,6 +346,12 @@ void MDCImporter::InternReadFile(
                 pcCVerts = (const MDC::CompressedVertex *)((int8_t *)pcSurface +
                                                            pcSurface->ulOffsetCompVerts) +
                            *mdcCompVert * pcSurface->ulNumVertices;
+                auto cvertBufStart = reinterpret_cast<const uint8_t*>(pcCVerts);
+                const size_t needCompVertBytes = sizeof(MDC::CompressedVertex) * pcSurface->ulNumVertices;
+                if (cvertBufStart < surfStart || cvertBufStart > surfEnd ||
+                    needCompVertBytes > static_cast<size_t>(surfEnd - cvertBufStart)) {
+                    throw DeadlyImportError("MDCImporter: pcCVerts points outside of surface block.");
+                }
             } else
                 mdcCompVert = nullptr;
         }
@@ -465,6 +459,13 @@ void MDCImporter::InternReadFile(
             pcMat->AddProperty(&path, AI_MATKEY_TEXTURE_DIFFUSE(0));
         }
     }
+
+    // Now rotate the whole scene 90 degrees around the x axis to convert to internal coordinate system
+    pScene->mRootNode->mTransformation = aiMatrix4x4(
+            1.f, 0.f, 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, -1.f, 0.f, 0.f,
+            0.f, 0.f, 0.f, 1.f);
 }
 
 #endif // !! ASSIMP_BUILD_NO_MDC_IMPORTER

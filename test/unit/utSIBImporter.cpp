@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -52,22 +52,84 @@ using namespace ::Assimp;
 class utSIBImporter : public AbstractImportExportBase {
 public:
     virtual bool importerTest() {
-        Assimp::Importer importer;
+        Importer importer;
         const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/SIB/heffalump.sib", aiProcess_ValidateDataStructure);
         return nullptr != scene;
     }
 };
 
-TEST_F(utSIBImporter, createTest) {
-    bool ok(true);
-    try {
-        SIBImporter myImporter;
-    } catch (...) {
-        ok = false;
-    }
-    EXPECT_TRUE(ok);
+TEST_F(utSIBImporter, importTest) {
+#ifdef ASSIMP_BUILD_NO_SIB_IMPORTER
+    EXPECT_FALSE(importerTest());
+#else
+    EXPECT_TRUE(importerTest());
+#endif
 }
 
-TEST_F(utSIBImporter, importTest) {
-    EXPECT_TRUE(importerTest());
+#ifndef ASSIMP_BUILD_NO_SIB_IMPORTER
+
+TEST_F(utSIBImporter, UvPointCountExceedingFace) {
+    // The face is built with a single point, but the UV ('FTVS') chunk claims the
+    // face has two. ReadUVs() would then walk its index cursor past the end of the
+    // per-face index data and off the end of mesh->idx, an out-of-bounds read. Such
+    // a UV chunk must be rejected.
+    static const unsigned char kSibData[] = {
+        // 'SHAP' chunk, 0x44 bytes of payload
+        0x53, 0x48, 0x41, 0x50, 0x44, 0x00, 0x00, 0x00,
+        // 'VRTS' chunk: a single vertex at the origin
+        0x56, 0x52, 0x54, 0x53, 0x0c, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // 'FACS' chunk: one face with a single point, index 0
+        0x46, 0x41, 0x43, 0x53, 0x08, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // 'FTVS' chunk: UVs for face 0 claiming two points
+        0x46, 0x54, 0x56, 0x53, 0x18, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x80, 0x3f,
+        0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x80, 0x3f
+    };
+
+    Importer importer;
+    const aiScene *scene = importer.ReadFileFromMemory(kSibData, sizeof(kSibData), 0, "sib");
+    EXPECT_EQ(nullptr, scene);
 }
+
+TEST_F(utSIBImporter, faceWithOverflowingPointCount) {
+    // The point count of a face is multiplied by the number of index channels to size
+    // the index array. 0x55555556 * 3 wraps around to 2 in 32-bit arithmetic, so the
+    // array is sized for two entries while the face loop writes many more. Such a face
+    // must be rejected instead.
+    static const unsigned char kSibData[] = {
+        // 'SHAP' chunk, 0x28 bytes of payload
+        0x53, 0x48, 0x41, 0x50, 0x28, 0x00, 0x00, 0x00,
+        // 'VRTS' chunk: a single vertex at the origin
+        0x56, 0x52, 0x54, 0x53, 0x0c, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // 'FACS' chunk: one face claiming 0x55555556 points
+        0x46, 0x41, 0x43, 0x53, 0x0c, 0x00, 0x00, 0x00,
+        0x56, 0x55, 0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
+
+    Importer importer;
+    const aiScene *scene = importer.ReadFileFromMemory(kSibData, sizeof(kSibData), 0, "sib");
+    EXPECT_EQ(nullptr, scene);
+}
+
+TEST_F(utSIBImporter, faceWithZeroPointCount) {
+    static const unsigned char kSibData[] = {
+        // 'SHAP' chunk, 0x20 bytes of payload
+        0x53, 0x48, 0x41, 0x50, 0x20, 0x00, 0x00, 0x00,
+        // 'VRTS' chunk: a single vertex at the origin
+        0x56, 0x52, 0x54, 0x53, 0x0c, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // 'FACS' chunk: one face claiming zero points
+        0x46, 0x41, 0x43, 0x53, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
+    };
+
+    Importer importer;
+    const aiScene *scene = importer.ReadFileFromMemory(kSibData, sizeof(kSibData), 0, "sib");
+    EXPECT_EQ(nullptr, scene);
+}
+
+#endif // !ASSIMP_BUILD_NO_SIB_IMPORTER

@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -40,13 +39,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ----------------------------------------------------------------------
 */
 #include <utility>
+#include <vector>
+#include <climits>
 #include "MMDPmxParser.h"
 #include <assimp/StringUtils.h>
-#ifdef ASSIMP_USE_HUNTER
-#  include <utf8.h>
-#else
-#  include "../contrib/utf8cpp/source/utf8.h"
-#endif
+#include "utf8.h"
 #include <assimp/Exceptional.h>
 
 namespace pmx
@@ -88,31 +85,53 @@ namespace pmx
 	{
 		int size;
 		stream->read((char*) &size, sizeof(int));
-		std::vector<char> buffer;
-		if (size == 0)
-		{
-			return std::string("");
+		
+		// FIX 1: Bounds check on size
+		const size_t MAX_STRING_SIZE = 10 * 1024 * 1024;
+		if (size < 0) {
+			throw DeadlyImportError("MMD: invalid string size");
 		}
-		buffer.reserve(size);
-		stream->read((char*) buffer.data(), size);
-		if (encoding == 0)
-		{
+		if (size == 0) {
+			return std::string();
+		}
+		if (static_cast<size_t>(size) > MAX_STRING_SIZE) {
+			throw DeadlyImportError("MMD: string size exceeds limit");
+		}
+		
+		auto sz = static_cast<size_t>(size);
+		
+		// FIX 2 & 3: Use std::vector instead of new[], and check for overflow
+		if (encoding == 0) {
 			// UTF16 to UTF8
+			if (sz % 2 != 0) {
+				throw DeadlyImportError("MMD: invalid UTF16 size");
+			}
+			
+			// FIX 2: Safe multiplication check (prevent SIZE_MAX / 3 overflow)
+			if (sz > SIZE_MAX / 3) {
+				throw DeadlyImportError("MMD: string size overflow");
+			}
+			
+			std::vector<char> buffer(sz);
+			stream->read(buffer.data(), sz);
+			
 			const uint16_t* sourceStart = (uint16_t*)buffer.data();
-			const unsigned int targetSize = size * 3; // enough to encode
-			char *targetStart = new char[targetSize];
-            std::memset(targetStart, 0, targetSize * sizeof(char));
-            
-            utf8::utf16to8( sourceStart, sourceStart + size/2, targetStart );
+			
+			// FIX 3: Use std::vector instead of new[]
+			size_t targetSize = sz * 3;
+			std::vector<char> target(targetSize, 0);
+			
+			const char* targetEnd = utf8::utf16to8(sourceStart, sourceStart + sz/2, target.data());
 
-			std::string result(targetStart);
-            delete [] targetStart;
-			return result;
-		}
-		else
-		{
-			// the name is already UTF8
-			return std::string((const char*)buffer.data(), size);
+			// FIX 4: Return string with explicit length, not just null-terminated
+			return std::string(target.data(), static_cast<size_t>(targetEnd - target.data()));
+		} else {
+			// UTF8 - use vector instead of new[]
+			std::vector<char> buffer(sz);
+			stream->read(buffer.data(), sz);
+			
+			// FIX 4: Return string with explicit length
+			return std::string(buffer.data(), sz);
 		}
 	}
 
@@ -126,6 +145,10 @@ namespace pmx
 		}
 		stream->read((char*) &encoding, sizeof(uint8_t));
 		stream->read((char*) &uv, sizeof(uint8_t));
+		if (uv > 4)
+		{
+			throw DeadlyImportError("MMD: invalid additional uv count");
+		}
 		stream->read((char*) &vertex_index_size, sizeof(uint8_t));
 		stream->read((char*) &texture_index_size, sizeof(uint8_t));
 		stream->read((char*) &material_index_size, sizeof(uint8_t));
@@ -478,8 +501,7 @@ namespace pmx
 
     void PmxSoftBody::Read(std::istream * /*stream*/, PmxSetting * /*setting*/)
 	{
-		std::cerr << "Not Implemented Exception" << std::endl;
-        throw DeadlyImportError("MMD: Not Implemented Exception");
+        throw DeadlyImportError("MMD: Soft Body support is not implemented.");
     }
 
 	void PmxModel::Init()
@@ -516,16 +538,14 @@ namespace pmx
 		char magic[4];
 		stream->read((char*) magic, sizeof(char) * 4);
 		if (magic[0] != 0x50 || magic[1] != 0x4d || magic[2] != 0x58 || magic[3] != 0x20)
-		{
-			std::cerr << "invalid magic number." << std::endl;
-      throw DeadlyImportError("MMD: invalid magic number.");
-    }
+        {
+            throw DeadlyImportError("MMD: Invalid magic number.");
+        }
 		stream->read((char*) &version, sizeof(float));
 		if (version != 2.0f && version != 2.1f)
 		{
-			std::cerr << "this is not ver2.0 or ver2.1 but " << version << "." << std::endl;
-            throw DeadlyImportError("MMD: this is not ver2.0 or ver2.1 but ", ai_to_string(version));
-    }
+            throw DeadlyImportError("MMD: Unsupported version (must be 2.0 or 2.1): ", ai_to_string(version));
+        }
 		this->setting.Read(stream);
 
 		this->model_name = ReadString(stream, setting.encoding);

@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -45,7 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // possible as new fields are added to assimp structures.
 
 // ----------------------------------------------------------------------------
-/** 
+/**
   * @file Implements Assimp::SceneCombiner. This is a smart utility
   *       class that combines multiple scenes, meshes, ... into one. Currently
   *       these utilities are used by the IRR and LWS loaders and the
@@ -53,7 +52,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   */
 // ----------------------------------------------------------------------------
 #include "ScenePrivate.h"
-#include "time.h"
 #include <assimp/Hash.h>
 #include <assimp/SceneCombiner.h>
 #include <assimp/StringUtils.h>
@@ -61,14 +59,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/mesh.h>
 #include <assimp/metadata.h>
 #include <assimp/scene.h>
-#include <stdio.h>
 #include <assimp/DefaultLogger.hpp>
+
+#include <unordered_set>
+#include <ctime>
+#include <cstdio>
 
 namespace Assimp {
 
 #if (__GNUC__ >= 8 && __GNUC_MINOR__ >= 0)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wclass-memaccess"
 #endif
 
 // ------------------------------------------------------------------------------------------------
@@ -78,9 +79,8 @@ inline void PrefixString(aiString &string, const char *prefix, unsigned int len)
     if (string.length >= 1 && string.data[0] == '$')
         return;
 
-    if (len + string.length >= MAXLEN - 1) {
-        ASSIMP_LOG_VERBOSE_DEBUG("Can't add an unique prefix because the string is too long");
-        ai_assert(false);
+    if (len + string.length >= AI_MAXLEN - 1) {
+        ASSIMP_LOG_ERROR("Can't add an unique prefix because the string is too long");
         return;
     }
 
@@ -95,6 +95,11 @@ inline void PrefixString(aiString &string, const char *prefix, unsigned int len)
 // ------------------------------------------------------------------------------------------------
 // Add node identifiers to a hashing set
 void SceneCombiner::AddNodeHashes(aiNode *node, std::set<unsigned int> &hashes) {
+    if (node == nullptr) {
+        ASSIMP_LOG_ERROR("Pointer to aiNode is nullptr.");
+        return;
+    }
+
     // Add node name to hashing set if it is non-empty - empty nodes are allowed
     // and they can't have any anims assigned so its absolutely safe to duplicate them.
     if (node->mName.length) {
@@ -110,7 +115,10 @@ void SceneCombiner::AddNodeHashes(aiNode *node, std::set<unsigned int> &hashes) 
 // ------------------------------------------------------------------------------------------------
 // Add a name prefix to all nodes in a hierarchy
 void SceneCombiner::AddNodePrefixes(aiNode *node, const char *prefix, unsigned int len) {
-    ai_assert(nullptr != prefix);
+    if (prefix == nullptr) {
+        ASSIMP_LOG_ERROR("Pointer to prefix is nullptr.");
+        return;
+    }
 
     PrefixString(node->mName, prefix, len);
 
@@ -138,7 +146,10 @@ bool SceneCombiner::FindNameMatch(const aiString &name, std::vector<SceneHelper>
 // Add a name prefix to all nodes in a hierarchy if a hash match is found
 void SceneCombiner::AddNodePrefixesChecked(aiNode *node, const char *prefix, unsigned int len,
         std::vector<SceneHelper> &input, unsigned int cur) {
-    ai_assert(nullptr != prefix);
+    if (prefix == nullptr) {
+        ASSIMP_LOG_ERROR("Pointer to prefix is nullptr.");
+        return;
+    }
 
     const unsigned int hash = SuperFastHash(node->mName.data, static_cast<uint32_t>(node->mName.length));
 
@@ -159,8 +170,9 @@ void SceneCombiner::AddNodePrefixesChecked(aiNode *node, const char *prefix, uns
 // ------------------------------------------------------------------------------------------------
 // Add an offset to all mesh indices in a node graph
 void SceneCombiner::OffsetNodeMeshIndices(aiNode *node, unsigned int offset) {
-    for (unsigned int i = 0; i < node->mNumMeshes; ++i)
+    for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
         node->mMeshes[i] += offset;
+    }
 
     for (unsigned int i = 0; i < node->mNumChildren; ++i) {
         OffsetNodeMeshIndices(node->mChildren[i], offset);
@@ -171,6 +183,7 @@ void SceneCombiner::OffsetNodeMeshIndices(aiNode *node, unsigned int offset) {
 // Merges two scenes. Currently only used by the LWS loader.
 void SceneCombiner::MergeScenes(aiScene **_dest, std::vector<aiScene *> &src, unsigned int flags) {
     if (nullptr == _dest) {
+        ASSIMP_LOG_ERROR("Pointer to destination scene is nullptr.");
         return;
     }
 
@@ -205,7 +218,7 @@ void SceneCombiner::MergeScenes(aiScene **_dest, std::vector<aiScene *> &src, un
 
 // ------------------------------------------------------------------------------------------------
 void SceneCombiner::AttachToGraph(aiNode *attach, std::vector<NodeAttachmentInfo> &srcList) {
-    unsigned int cnt;
+    unsigned int cnt{0};
     for (cnt = 0; cnt < attach->mNumChildren; ++cnt) {
         AttachToGraph(attach->mChildren[cnt], srcList);
     }
@@ -213,8 +226,9 @@ void SceneCombiner::AttachToGraph(aiNode *attach, std::vector<NodeAttachmentInfo
     cnt = 0;
     for (std::vector<NodeAttachmentInfo>::iterator it = srcList.begin();
             it != srcList.end(); ++it) {
-        if ((*it).attachToNode == attach && !(*it).resolved)
+        if ((*it).attachToNode == attach && !(*it).resolved) {
             ++cnt;
+        }
     }
 
     if (cnt) {
@@ -252,6 +266,14 @@ void SceneCombiner::AttachToGraph(aiScene *master, std::vector<NodeAttachmentInf
 // ------------------------------------------------------------------------------------------------
 void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<AttachmentInfo> &srcList, unsigned int flags) {
     if (nullptr == _dest) {
+        std::unordered_set<aiScene *> uniqueScenes;
+        uniqueScenes.insert(master);
+        for (const auto &item : srcList) {
+            uniqueScenes.insert(item.scene);
+        }
+        for (const auto &item : uniqueScenes) {
+            delete item;
+        }
         return;
     }
 
@@ -259,6 +281,7 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
     if (srcList.empty()) {
         if (*_dest) {
             SceneCombiner::CopySceneFlat(_dest, master);
+            delete master;
         } else
             *_dest = master;
         return;
@@ -299,22 +322,7 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
 
     // Generate unique names for all named stuff?
     if (flags & AI_INT_MERGE_SCENE_GEN_UNIQUE_NAMES) {
-#if 0
-        // Construct a proper random number generator
-        boost::mt19937 rng(  );
-        boost::uniform_int<> dist(1u,1 << 24u);
-        boost::variate_generator<boost::mt19937&, boost::uniform_int<> > rndGen(rng, dist);
-#endif
         for (unsigned int i = 1; i < src.size(); ++i) {
-            //if (i != duplicates[i])
-            //{
-            //  // duplicate scenes share the same UID
-            //  ::strcpy( src[i].id, src[duplicates[i]].id );
-            //  src[i].idlen = src[duplicates[i]].idlen;
-
-            //  continue;
-            //}
-
             src[i].idlen = ai_snprintf(src[i].id, 32, "$%.6X$_", i);
 
             if (flags & AI_INT_MERGE_SCENE_GEN_UNIQUE_NAMES_IF_NECESSARY) {
@@ -359,19 +367,20 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
 
     // generate the output texture list + an offset table for all texture indices
     if (dest->mNumTextures) {
-        aiTexture **pip = dest->mTextures = new aiTexture *[dest->mNumMaterials];
+        aiTexture **pip = dest->mTextures = new aiTexture *[dest->mNumTextures];
         cnt = 0;
         for (unsigned int n = 0; n < src.size(); ++n) {
             SceneHelper *cur = &src[n];
             for (unsigned int i = 0; i < (*cur)->mNumTextures; ++i) {
                 if (n != duplicates[n]) {
-                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY)
+                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY) {
                         Copy(pip, (*cur)->mTextures[i]);
-
-                    else
+                    } else {
                         continue;
-                } else
+                    }
+                } else {
                     *pip = (*cur)->mTextures[i];
+                }
                 ++pip;
             }
 
@@ -388,13 +397,14 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
             SceneHelper *cur = &src[n];
             for (unsigned int i = 0; i < (*cur)->mNumMaterials; ++i) {
                 if (n != duplicates[n]) {
-                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY)
+                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY) {
                         Copy(pip, (*cur)->mMaterials[i]);
-
-                    else
+                    } else {
                         continue;
-                } else
+                    }
+                } else {
                     *pip = (*cur)->mMaterials[i];
+                }
 
                 if ((*cur)->mNumTextures != dest->mNumTextures) {
                     // We need to update all texture indices of the mesh. So we need to search for
@@ -406,11 +416,25 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
                             // Check whether this texture is an embedded texture.
                             // In this case the property looks like this: *<n>,
                             // where n is the index of the texture.
-                            aiString &s = *((aiString *)prop->mData);
+                            // Copy here because we overwrite the string data in-place and the buffer inside of aiString
+                            // will be a lie if we just reinterpret from prop->mData. The size of mData is not guaranteed to be
+                            // AI_MAXLEN in size.
+                            aiString s(*(aiString *)prop->mData);
                             if ('*' == s.data[0]) {
                                 // Offset the index and write it back ..
                                 const unsigned int idx = strtoul10(&s.data[1]) + offset[n];
-                                ASSIMP_itoa10(&s.data[1], sizeof(s.data) - 1, idx);
+                                const unsigned int oldLen = s.length;
+
+                                s.length = 1 + ASSIMP_itoa10(&s.data[1], sizeof(s.data) - 1, idx);
+
+                                // The string changed in size so we need to reallocate the buffer for the property.
+                                if (oldLen < s.length) {
+                                    prop->mDataLength += s.length - oldLen;
+                                    delete[] prop->mData;
+                                    prop->mData = new char[prop->mDataLength];
+                                }
+
+                                memcpy(prop->mData, static_cast<void*>(&s), prop->mDataLength);
                             }
                         }
 
@@ -437,16 +461,21 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
             SceneHelper *cur = &src[n];
             for (unsigned int i = 0; i < (*cur)->mNumMeshes; ++i) {
                 if (n != duplicates[n]) {
-                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY)
+                    if (flags & AI_INT_MERGE_SCENE_DUPLICATES_DEEP_CPY) {
                         Copy(pip, (*cur)->mMeshes[i]);
-
-                    else
+                    } else {
                         continue;
-                } else
+                    }
+                } else {
                     *pip = (*cur)->mMeshes[i];
+                }
 
                 // update the material index of the mesh
-                (*pip)->mMaterialIndex += offset[n];
+                if ((*pip) != nullptr) {
+                    (*pip)->mMaterialIndex += offset[n];
+                } else {
+                    ASSIMP_LOG_ERROR("CopyMeshes: Missing mesh instance found, skipped.");
+                }
                 ++pip;
             }
 
@@ -496,7 +525,7 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
             OffsetNodeMeshIndices(node, offset[n]);
         }
         if (n) // src[0] is the master node
-            nodes.push_back(NodeAttachmentInfo(node, srcList[n - 1].attachToNode, n));
+            nodes.emplace_back(node, srcList[n - 1].attachToNode, n);
 
         // add name prefixes?
         if (flags & AI_INT_MERGE_SCENE_GEN_UNIQUE_NAMES) {
@@ -612,7 +641,7 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
                 }
             }
             if (!(*it).resolved) {
-                ASSIMP_LOG_ERROR_F("SceneCombiner: Failed to resolve attachment ", (*it).node->mName.data,
+                ASSIMP_LOG_ERROR("SceneCombiner: Failed to resolve attachment ", (*it).node->mName.data,
                         " ", (*it).attachToNode->mName.data);
             }
         }
@@ -638,6 +667,8 @@ void SceneCombiner::MergeScenes(aiScene **_dest, aiScene *master, std::vector<At
         deleteMe->mMaterials = nullptr;
         delete[] deleteMe->mAnimations;
         deleteMe->mAnimations = nullptr;
+        delete[] deleteMe->mTextures;
+        deleteMe->mTextures = nullptr;
 
         deleteMe->mRootNode = nullptr;
 
@@ -669,19 +700,19 @@ void SceneCombiner::BuildUniqueBoneList(std::list<BoneWithHash> &asBones,
 
             for (; it2 != end2; ++it2) {
                 if ((*it2).first == itml) {
-                    (*it2).pSrcBones.push_back(BoneSrcIndex(p, iOffset));
+                    (*it2).pSrcBones.emplace_back(p, iOffset);
                     break;
                 }
             }
             if (end2 == it2) {
                 // need to begin a new bone entry
-                asBones.push_back(BoneWithHash());
+                asBones.emplace_back();
                 BoneWithHash &btz = asBones.back();
 
                 // setup members
                 btz.first = itml;
                 btz.second = &p->mName;
-                btz.pSrcBones.push_back(BoneSrcIndex(p, iOffset));
+                btz.pSrcBones.emplace_back(p, iOffset);
             }
         }
         iOffset += (*it)->mNumVertices;
@@ -968,7 +999,7 @@ inline void GetArrayCopy(Type *&dest, ai_uint num) {
     Type *old = dest;
 
     dest = new Type[num];
-    ::memcpy(dest, old, sizeof(Type) * num);
+    std::copy(old, old+num, dest);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1041,7 +1072,7 @@ void SceneCombiner::CopyScene(aiScene **_dest, const aiScene *src, bool allocate
     dest->mFlags = src->mFlags;
 
     // source private data might be nullptr if the scene is user-allocated (i.e. for use with the export API)
-    if (dest->mPrivate != nullptr) {
+    if (src->mPrivate != nullptr) {
         ScenePriv(dest)->mPPStepsApplied = ScenePriv(src) ? ScenePriv(src)->mPPStepsApplied : 0;
     }
 }
@@ -1063,14 +1094,19 @@ void SceneCombiner::Copy(aiMesh **_dest, const aiMesh *src) {
     GetArrayCopy(dest->mTangents, dest->mNumVertices);
     GetArrayCopy(dest->mBitangents, dest->mNumVertices);
 
-    unsigned int n = 0;
-    while (dest->HasTextureCoords(n)) {
-        GetArrayCopy(dest->mTextureCoords[n++], dest->mNumVertices);
+    // Reallocate every populated UV and color channel. The destructor frees
+    // all AI_MAX_NUMBER_OF_* channels, so the copy must own an independent
+    // buffer for each non-null one. Iterating with HasTextureCoords()/
+    // HasVertexColors() would stop at the first empty channel (leaving any
+    // later channel aliased with the source) and also skip channels of a mesh
+    // with mNumVertices == 0, which then double-frees when both meshes are
+    // destroyed.
+    for (unsigned int n = 0; n < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++n) {
+        GetArrayCopy(dest->mTextureCoords[n], dest->mNumVertices);
     }
 
-    n = 0;
-    while (dest->HasVertexColors(n)) {
-        GetArrayCopy(dest->mColors[n++], dest->mNumVertices);
+    for (unsigned int n = 0; n < AI_MAX_NUMBER_OF_COLOR_SETS; ++n) {
+        GetArrayCopy(dest->mColors[n], dest->mNumVertices);
     }
 
     // make a deep copy of all bones
@@ -1078,13 +1114,17 @@ void SceneCombiner::Copy(aiMesh **_dest, const aiMesh *src) {
 
     // make a deep copy of all faces
     GetArrayCopy(dest->mFaces, dest->mNumFaces);
-    for (unsigned int i = 0; i < dest->mNumFaces; ++i) {
-        aiFace &f = dest->mFaces[i];
-        GetArrayCopy(f.mIndices, f.mNumIndices);
-    }
 
     // make a deep copy of all blend shapes
     CopyPtrArray(dest->mAnimMeshes, dest->mAnimMeshes, dest->mNumAnimMeshes);
+
+    // make a deep copy of all texture coordinate names
+    if (src->mTextureCoordsNames != nullptr) {
+        dest->mTextureCoordsNames = new aiString *[AI_MAX_NUMBER_OF_TEXTURECOORDS] {};
+        for (unsigned int i = 0; i < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++i) {
+            Copy(&dest->mTextureCoordsNames[i], src->mTextureCoordsNames[i]);
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1325,11 +1365,26 @@ void SceneCombiner::Copy(aiMetadata **_dest, const aiMetadata *src) {
         case AI_AIVECTOR3D:
             out.mData = new aiVector3D(*static_cast<aiVector3D *>(in.mData));
             break;
+        case AI_AIMETADATA:
+            out.mData = new aiMetadata(*static_cast<aiMetadata *>(in.mData));
+            break;
         default:
             ai_assert(false);
             break;
         }
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+void SceneCombiner::Copy(aiString **_dest, const aiString *src) {
+    if (nullptr == _dest || nullptr == src) {
+        return;
+    }
+
+    aiString *dest = *_dest = new aiString();
+
+    // get a flat copy
+    *dest = *src;
 }
 
 #if (__GNUC__ >= 8 && __GNUC_MINOR__ >= 0)

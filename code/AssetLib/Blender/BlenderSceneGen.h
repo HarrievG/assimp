@@ -47,7 +47,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "BlenderDNA.h"
 #include "BlenderScene.h"
 
-namespace Assimp    {
+namespace Assimp {
 namespace Blender {
 
 template <> void Structure :: Convert<Object> (
@@ -58,6 +58,12 @@ template <> void Structure :: Convert<Object> (
 
 template <> void Structure :: Convert<Group> (
     Group& dest,
+    const FileDatabase& db
+    ) const
+;
+
+template <> void Structure::Convert<Collection>(
+    Collection& dest,
     const FileDatabase& db
     ) const
 ;

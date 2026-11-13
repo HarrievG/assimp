@@ -4,7 +4,7 @@ Open Asset Import Library (Assimp) Viewer Installer
 Release Notes
 ------------------------------------------------------------------------------------
 
-http://assimp.sf.net
+https://www.assimp.org
 
 Known Bugs & Limitations
 ========================
@@ -19,7 +19,7 @@ Viewer
 Troubleshooting
 ===============
 
-1. Missing d3dx9_(number).dll? 
+1. Missing d3dx9_(number).dll?
 Install the latest DirectX runtime or grab the file from somewhere (that's evil but mostly fine).
 
 2. Application configuration not correct / missing msvcr***.dll?

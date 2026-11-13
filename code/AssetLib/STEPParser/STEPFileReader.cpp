@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -40,54 +39,81 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ----------------------------------------------------------------------
 */
 
-/** @file  STEPFileReader.cpp
+/**
+ * @file  STEPFileReader.cpp
  *  @brief Implementation of the STEP file parser, which fills a
- *     STEP::DB with data read from a file.
+ *         STEP::DB with data read from a file.
  */
 
 #include "STEPFileReader.h"
 #include "STEPFileEncoding.h"
 #include <assimp/TinyFormatter.h>
 #include <assimp/fast_atof.h>
-#include <memory>
 #include <functional>
+#include <memory>
+#include <utility>
 
 using namespace Assimp;
 
 namespace EXPRESS = STEP::EXPRESS;
 
 // ------------------------------------------------------------------------------------------------
-std::string AddLineNumber(const std::string& s,uint64_t line /*= LINE_NOT_SPECIFIED*/, const std::string& prefix = "")
-{
+std::string AddLineNumber(const std::string& s,uint64_t line /*= LINE_NOT_SPECIFIED*/, const std::string& prefix = std::string()) {
     return line == STEP::SyntaxError::LINE_NOT_SPECIFIED ? prefix+s : static_cast<std::string>( (Formatter::format(),prefix,"(line ",line,") ",s) );
 }
 
 // ------------------------------------------------------------------------------------------------
-std::string AddEntityID(const std::string& s,uint64_t entity /*= ENTITY_NOT_SPECIFIED*/, const std::string& prefix = "")
-{
+std::string AddEntityID(const std::string& s,uint64_t entity /*= ENTITY_NOT_SPECIFIED*/, const std::string& prefix = std::string()) {
     return entity == STEP::TypeError::ENTITY_NOT_SPECIFIED ? prefix+s : static_cast<std::string>( (Formatter::format(),prefix,"(entity #",entity,") ",s));
 }
 
 
 // ------------------------------------------------------------------------------------------------
-STEP::SyntaxError::SyntaxError (const std::string& s,uint64_t line /* = LINE_NOT_SPECIFIED */)
-: DeadlyImportError(AddLineNumber(s,line))
-{
-
+STEP::SyntaxError::SyntaxError (const std::string& s,uint64_t line) : DeadlyImportError(AddLineNumber(s,line)) {
+    // empty
 }
 
 // ------------------------------------------------------------------------------------------------
-STEP::TypeError::TypeError (const std::string& s,uint64_t entity /* = ENTITY_NOT_SPECIFIED */,uint64_t line /*= LINE_NOT_SPECIFIED*/)
-: DeadlyImportError(AddLineNumber(AddEntityID(s,entity),line))
-{
-
+STEP::TypeError::TypeError (const std::string& s,uint64_t entity, uint64_t line) : DeadlyImportError(AddLineNumber(AddEntityID(s,entity),line)) {
+    // empty
 }
 
-static const char *ISO_Token         = "ISO-10303-21;";
-static const char *FILE_SCHEMA_Token = "FILE_SCHEMA";
+static constexpr char ISO_Token[]         = "ISO-10303-21;";
+static constexpr char FILE_SCHEMA_Token[] = "FILE_SCHEMA";
 // ------------------------------------------------------------------------------------------------
+namespace {
+
+// parse the FILE_SCHEMA list entity, throwing SyntaxError on malformed input
+void ParseFileSchema(const EXPRESS::DataType *schema, STEP::HeaderInfo &head, uint64_t line) {
+    // the file schema should be a regular list entity, although it usually contains exactly one entry
+    // since the list itself is contained in a regular parameter list, we actually have
+    // two nested lists.
+    const auto *list = dynamic_cast<const EXPRESS::LIST *>(schema);
+    if (list == nullptr || !list->GetSize()) {
+        return;
+    }
+    list = dynamic_cast<const EXPRESS::LIST *>((*list)[0].get());
+    if (!list) {
+        throw STEP::SyntaxError("expected FILE_SCHEMA to be a list", line);
+    }
+
+    // XXX need support for multiple schemas?
+    if (list->GetSize() > 1) {
+        ASSIMP_LOG_WARN(AddLineNumber("multiple schemas currently not supported", line));
+    }
+    const EXPRESS::STRING *string = list->GetSize()
+            ? dynamic_cast<const EXPRESS::STRING *>((*list)[0].get())
+            : nullptr;
+    if (nullptr == string) {
+        throw STEP::SyntaxError("expected FILE_SCHEMA to contain a single string literal", line);
+    }
+    head.fileSchema = *string;
+}
+
+} // namespace
+
 STEP::DB* STEP::ReadFileHeader(std::shared_ptr<IOStream> stream) {
-    std::shared_ptr<StreamReaderLE> reader = std::shared_ptr<StreamReaderLE>(new StreamReaderLE(stream));
+    std::shared_ptr<StreamReaderLE> reader = std::shared_ptr<StreamReaderLE>(new StreamReaderLE(std::move(stream)));
     std::unique_ptr<STEP::DB> db = std::unique_ptr<STEP::DB>(new STEP::DB(reader));
 
     LineSplitter &splitter = db->GetSplitter();
@@ -109,29 +135,10 @@ STEP::DB* STEP::ReadFileHeader(std::shared_ptr<IOStream> stream) {
 
         if (s.substr(0,11) == FILE_SCHEMA_Token) {
             const char* sz = s.c_str()+11;
-            SkipSpaces(sz,&sz);
-            std::shared_ptr< const EXPRESS::DataType > schema = EXPRESS::DataType::Parse(sz);
-
-            // the file schema should be a regular list entity, although it usually contains exactly one entry
-            // since the list itself is contained in a regular parameter list, we actually have
-            // two nested lists.
-            const EXPRESS::LIST* list = dynamic_cast<const EXPRESS::LIST*>(schema.get());
-            if (list && list->GetSize()) {
-                list = dynamic_cast<const EXPRESS::LIST*>( (*list)[0].get() );
-                if (!list) {
-                    throw STEP::SyntaxError("expected FILE_SCHEMA to be a list",line);
-                }
-
-                // XXX need support for multiple schemas?
-                if (list->GetSize() > 1)    {
-                    ASSIMP_LOG_WARN(AddLineNumber("multiple schemas currently not supported",line));
-                }
-                const EXPRESS::STRING *string = dynamic_cast<const EXPRESS::STRING *>((*list)[0].get());
-                if (!list->GetSize() || nullptr == string ) {
-                    throw STEP::SyntaxError("expected FILE_SCHEMA to contain a single string literal",line);
-                }
-                head.fileSchema =  *string;
-            }
+            const char *end = s.c_str() + s.size();
+            SkipSpaces(sz,&sz, end);
+            std::shared_ptr< const EXPRESS::DataType > schema = EXPRESS::DataType::Parse(sz, end);
+            ParseFileSchema(schema.get(), head, line);
         }
 
         // XXX handle more header fields
@@ -297,16 +304,16 @@ void STEP::ReadFile(DB& db,const EXPRESS::ConversionSchema& scheme,
     }
 
     if ( !DefaultLogger::isNullLogger()){
-        ASSIMP_LOG_DEBUG((Formatter::format(),"STEP: got ",map.size()," object records with ",
-            db.GetRefs().size()," inverse index entries"));
+        ASSIMP_LOG_DEBUG("STEP: got ",map.size()," object records with ",
+            db.GetRefs().size()," inverse index entries");
     }
 }
 
 // ------------------------------------------------------------------------------------------------
-std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& inout,uint64_t line, const EXPRESS::ConversionSchema* schema /*= nullptr*/)
+std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& inout, const char *end, uint64_t line, const EXPRESS::ConversionSchema* schema /*= nullptr*/)
 {
     const char* cur = inout;
-    SkipSpaces(&cur);
+    SkipSpaces(&cur, end);
     if (*cur == ',' || IsSpaceOrNewLine(*cur)) {
         throw STEP::SyntaxError("unexpected token, expected parameter",line);
     }
@@ -324,7 +331,7 @@ std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& i
                 std::transform(s.begin(),s.end(),s.begin(),&ai_tolower<char> );
                 if (schema->IsKnownToken(s)) {
                     for(cur = t+1;*cur++ != '(';);
-                    const std::shared_ptr<const EXPRESS::DataType> dt = Parse(cur);
+                    std::shared_ptr<const EXPRESS::DataType> dt = Parse(cur, end);
                     inout = *cur ? cur+1 : cur;
                     return dt;
                 }
@@ -347,7 +354,7 @@ std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& i
     else if (*cur == '(' ) {
         // start of an aggregate, further parsing is done by the LIST factory constructor
         inout = cur;
-        return EXPRESS::LIST::Parse(inout,line,schema);
+        return EXPRESS::LIST::Parse(inout, end, line, schema);
     }
     else if (*cur == '.' ) {
         // enum (includes boolean)
@@ -408,7 +415,7 @@ std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& i
     for(;*cur  && *cur != ',' && *cur != ')' && !IsSpace(*cur);++cur) {
         if (*cur == '.') {
             double f;
-            inout = fast_atoreal_move<double>(start,f);
+            inout = fast_atoreal_move(start,f);
             return std::make_shared<EXPRESS::REAL>(f);
         }
     }
@@ -426,9 +433,10 @@ std::shared_ptr<const EXPRESS::DataType> EXPRESS::DataType::Parse(const char*& i
 }
 
 // ------------------------------------------------------------------------------------------------
-std::shared_ptr<const EXPRESS::LIST> EXPRESS::LIST::Parse(const char*& inout,uint64_t line, const EXPRESS::ConversionSchema* schema /*= nullptr*/) {
+std::shared_ptr<const EXPRESS::LIST> EXPRESS::LIST::Parse(const char*& inout, const char *end,
+        uint64_t line, const EXPRESS::ConversionSchema* schema) {
     const std::shared_ptr<EXPRESS::LIST> list = std::make_shared<EXPRESS::LIST>();
-    EXPRESS::LIST::MemberList& members = list->members;
+    EXPRESS::LIST::MemberList& cur_members = list->members;
 
     const char* cur = inout;
     if (*cur++ != '(') {
@@ -437,23 +445,23 @@ std::shared_ptr<const EXPRESS::LIST> EXPRESS::LIST::Parse(const char*& inout,uin
 
     // estimate the number of items upfront - lists can grow large
     size_t count = 1;
-    for(const char* c=cur; *c && *c != ')'; ++c) {
+    for(const char* c=cur; *c && c != end && *c != ')'; ++c) {
         count += (*c == ',' ? 1 : 0);
     }
 
-    members.reserve(count);
+    cur_members.reserve(count);
 
     for(;;++cur) {
         if (!*cur) {
             throw STEP::SyntaxError("unexpected end of line while reading list");
         }
-        SkipSpaces(cur,&cur);
+        SkipSpaces(cur,&cur, end);
         if (*cur == ')') {
             break;
         }
 
-        members.push_back( EXPRESS::DataType::Parse(cur,line,schema));
-        SkipSpaces(cur,&cur);
+        cur_members.push_back(EXPRESS::DataType::Parse(cur, end, line, schema));
+        SkipSpaces(cur, &cur, end);
 
         if (*cur != ',') {
             if (*cur == ')') {
@@ -463,7 +471,7 @@ std::shared_ptr<const EXPRESS::LIST> EXPRESS::LIST::Parse(const char*& inout,uin
         }
     }
 
-    inout = cur+1;
+    inout = cur + 1;
     return list;
 }
 
@@ -502,21 +510,13 @@ STEP::LazyObject::LazyObject(DB& db, uint64_t id,uint64_t /*line*/, const char* 
     int64_t skip_depth( 0 );
     while ( *a ) {
         handleSkippedDepthFromToken(a, skip_depth);
-        /*if (*a == '(') {
-            ++skip_depth;
-        } else if (*a == ')') {
-            --skip_depth;
-        }*/
 
-		if (skip_depth >= 1 && *a=='#') {
-			if (*(a + 1) != '#') {
-				/*const char *tmp;
-				const int64_t num = static_cast<int64_t>(strtoul10_64(a + 1, &tmp));
-				db.MarkRef(num, id);*/
-                db.MarkRef(getIdFromToken(a), id);
-			} else {
-				++a;
-			}
+	if (skip_depth >= 1 && *a=='#') {
+		if (*(a + 1) != '#') {
+			db.MarkRef(getIdFromToken(a), id);
+		} else {
+			++a;
+		}
         }
         ++a;
     }
@@ -542,7 +542,8 @@ void STEP::LazyObject::LazyInit() const {
     }
 
     const char* acopy = args;
-    std::shared_ptr<const EXPRESS::LIST> conv_args = EXPRESS::LIST::Parse(acopy,(uint64_t)STEP::SyntaxError::LINE_NOT_SPECIFIED,&db.GetSchema());
+    const char *end = acopy + std::strlen(args);
+    std::shared_ptr<const EXPRESS::LIST> conv_args = EXPRESS::LIST::Parse(acopy, end, (uint64_t)STEP::SyntaxError::LINE_NOT_SPECIFIED,&db.GetSchema());
     delete[] args;
     args = nullptr;
 

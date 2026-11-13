@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2020, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -45,96 +45,89 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <assimp/mesh.h>
 #include <assimp/types.h>
-#include <map>
+#include <assimp/SmallVector.h>
+#include <unordered_map>
 #include <vector>
+#include "Common/Maybe.h"
 
-namespace Assimp {
-namespace ObjFile {
+namespace Assimp::ObjFile {
 
 struct Object;
 struct Face;
 struct Material;
 
 // ------------------------------------------------------------------------------------------------
-//! \struct Face
-//! \brief  Data structure for a simple obj-face, describes discredit,l.ation and materials
+/// @struct Face
+/// @brief  Data structure for a simple obj-face, describes discredit,l.ation and materials
 // ------------------------------------------------------------------------------------------------
 struct Face {
-    typedef std::vector<unsigned int> IndexArray;
+    // Faces are almost always triangles or quads, so keep their index arrays
+    // inline (no heap allocation for <= 4 vertices) and only spill to the heap
+    // for larger polygons.
+    using IndexArray = SmallVector<unsigned int, 4>;
 
-    //! Primitive type
-    aiPrimitiveType m_PrimitiveType;
-    //! Vertex indices
-    IndexArray m_vertices;
-    //! Normal indices
-    IndexArray m_normals;
-    //! Texture coordinates indices
-    IndexArray m_texturCoords;
-    //! Pointer to assigned material
-    Material *m_pMaterial;
+    aiPrimitiveType mPrimitiveType{aiPrimitiveType_TRIANGLE};   ///< Primitive type
+    IndexArray mVertices{};                                     ///< Vertex indices
+    IndexArray mNormals{};                                      ///< Normal indices
+    IndexArray mTextureCoords{};                                ///< Texture coordinates indices
+    Material *mMaterial{nullptr};                               ///< Pointer to assigned material
 
-    //! \brief  Default constructor
-    Face(aiPrimitiveType pt = aiPrimitiveType_POLYGON) :
-            m_PrimitiveType(pt), m_vertices(), m_normals(), m_texturCoords(), m_pMaterial(0L) {
+    /// @brief  Default constructor with default primitive type.
+    /// @param [in] pt  Primitive type.
+    explicit Face(aiPrimitiveType pt = aiPrimitiveType_POLYGON) :
+            mPrimitiveType(pt) {
         // empty
     }
 
-    //! \brief  Destructor
-    ~Face() {
-        // empty
-    }
+    ~Face() = default;
 };
 
 // ------------------------------------------------------------------------------------------------
-//! \struct Object
-//! \brief  Stores all objects of an obj-file object definition
+/// @struct Object
+/// @brief  Stores all objects of an obj-file object definition
 // ------------------------------------------------------------------------------------------------
 struct Object {
+    /// @brief  Object type.
     enum ObjectType {
         ObjType,
         GroupType
     };
 
-    //! Object name
-    std::string m_strObjName;
-    //! Transformation matrix, stored in OpenGL format
-    aiMatrix4x4 m_Transformation;
-    //! All sub-objects referenced by this object
-    std::vector<Object *> m_SubObjects;
-    /// Assigned meshes
-    std::vector<unsigned int> m_Meshes;
+    std::string mObjName{};                 ///< Object name
+    aiMatrix4x4 mTransformation{};          ///< Transformation matrix, stored in OpenGL format
+    std::vector<Object *> mSubObjects{};    ///< All sub-objects referenced by this object
+    std::vector<unsigned int> mMeshes{};    ///< Assigned meshes
 
-    //! \brief  Default constructor
     Object() = default;
-
-    //! \brief  Destructor
     ~Object() {
-        for (std::vector<Object *>::iterator it = m_SubObjects.begin(); it != m_SubObjects.end(); ++it) {
+        for (auto it = mSubObjects.begin(); it != mSubObjects.end(); ++it) {
             delete *it;
         }
     }
 };
 
 // ------------------------------------------------------------------------------------------------
-//! \struct Material
-//! \brief  Data structure to store all material specific data
+/// @struct Material
+/// @brief  Data structure to store all material specific data
 // ------------------------------------------------------------------------------------------------
 struct Material {
-    //! Name of material description
-    aiString MaterialName;
+    aiString MaterialName;          ///< Name of material description
+    aiString texture;               ///< Texture names
+    aiString textureSpecular;       ///< Specular texture name
+    aiString textureAmbient;        ///< Ambient texture name
+    aiString textureEmissive;       ///< Emissive texture name
+    aiString textureBump;           ///< Bump texture name
+    aiString textureNormal;         ///< Normal texture name
+    aiString textureReflection[6];  ///< Reflection texture names
+    aiString textureSpecularity;    ///< Specularity texture names
+    aiString textureOpacity;        ///< Opacity texture names
+    aiString textureDisp;           ///< Displaycement  texture names
+    aiString textureRoughness;      ///< Roughness texture names
+    aiString textureMetallic;       ///< Metallic texture names
+    aiString textureSheen;          ///< Sheen texture names
+    aiString textureRMA;            ///< RMA  texture names
 
-    //! Texture names
-    aiString texture;
-    aiString textureSpecular;
-    aiString textureAmbient;
-    aiString textureEmissive;
-    aiString textureBump;
-    aiString textureNormal;
-    aiString textureReflection[6];
-    aiString textureSpecularity;
-    aiString textureOpacity;
-    aiString textureDisp;
-
+    /// @brief  Texture types enum.
     enum TextureType {
         TextureDiffuseType = 0,
         TextureSpecularType,
@@ -152,173 +145,149 @@ struct Material {
         TextureSpecularityType,
         TextureOpacityType,
         TextureDispType,
+        TextureRoughnessType,
+        TextureMetallicType,
+        TextureSheenType,
+        TextureRMAType,
         TextureTypeCount
     };
     bool clamp[TextureTypeCount];
 
-    //! Ambient color
-    aiColor3D ambient;
-    //! Diffuse color
-    aiColor3D diffuse;
-    //! Specular color
-    aiColor3D specular;
-    //! Emissive color
-    aiColor3D emissive;
-    //! Alpha value
-    ai_real alpha;
-    //! Shineness factor
-    ai_real shineness;
-    //! Illumination model
-    int illumination_model;
-    //! Index of refraction
-    ai_real ior;
-    //! Transparency color
-    aiColor3D transparent;
+    ///< Ambient color
+    aiColor3D ambient{};
+    ///< Diffuse color
+    aiColor3D diffuse = aiColor3D(0.6f, 0.6f, 0.6f);
+    ///< Specular color
+    aiColor3D specular{};
+    ///< Emissive color
+    aiColor3D emissive{};
+    ///< Alpha value
+    ai_real alpha{1};
+    ///< Shineness factor
+    ai_real shineness = ai_real(0.0);
+    ///< Illumination model
+    int illumination_model{1};
+    ///< Index of refraction
+    ai_real ior{1};
+    ///< Transparency color
+    aiColor3D transparent = aiColor3D(1.0f, 1.0f, 1.0f);
+    ///< Ambient occlusion
+    Maybe<ai_real> ambient_occlusion{};
+    ///< PBR Roughness
+    Maybe<ai_real> roughness{};
+    ///< PBR Metallic
+    Maybe<ai_real> metallic{};
+    ///< PBR Metallic
+    Maybe<aiColor3D> sheen{};
+    ///< PBR Sheen: an additional grazing component, primarily intended for cloth.
+    Maybe<ai_real> sheen_grazing{};
+    ///< PBR Sheen Tint: amount to tint sheen towards base color.
+    Maybe<ai_real> sheen_tint{};
+    ///< PBR Clearcoat
+    Maybe<ai_real> clearcoat{};
+    ///< PBR Clearcoat Thickness
+    Maybe<ai_real> clearcoat_thickness{};
+    ///< PBR Clearcoat Roughness
+    Maybe<ai_real> clearcoat_roughness{};
+    ///< PBR clearcoatGloss: controls clearcoat glossiness (0 = a “satin” appearance, 1 = a “gloss” appearance).
+    Maybe<ai_real> clearcoat_gloss{};
+    ///< PBR Anisotropy
+    ai_real anisotropy{0};
+    ///< PBR Anisotropy Rotation
+    Maybe<ai_real> anisotropy_rotation{};
+    ///< PBR Subsurface Scattering
+    Maybe<ai_real> subsurface_scattering{};
+    ///< PBR Specular Tint: a concession for artistic control that tints incident specular towards the base color.
+    Maybe<ai_real> specular_tint{};
+    /// See: https://disneyanimation.com/publications/physically-based-shading-at-disney/
+    ///<  bump map multiplier (normal map scalar)(-bm)
+    ai_real bump_multiplier{1};
 
-    //! Constructor
-    Material() :
-            diffuse(ai_real(0.6), ai_real(0.6), ai_real(0.6)),
-            alpha(ai_real(1.0)),
-            shineness(ai_real(0.0)),
-            illumination_model(1),
-            ior(ai_real(1.0)),
-            transparent(ai_real(1.0), ai_real(1.0), ai_real(1.0)) {
+    /// Constructor
+    Material() {
         std::fill_n(clamp, static_cast<unsigned int>(TextureTypeCount), false);
     }
 
-    // Destructor
+    /// Destructor
     ~Material() = default;
 };
 
 // ------------------------------------------------------------------------------------------------
-//! \struct Mesh
-//! \brief  Data structure to store a mesh
+/// @struct Mesh
+/// @brief  Data structure to store a mesh
 // ------------------------------------------------------------------------------------------------
 struct Mesh {
-    static const unsigned int NoMaterial = ~0u;
-    /// The name for the mesh
-    std::string m_name;
-    /// Array with pointer to all stored faces
-    std::vector<Face *> m_Faces;
-    /// Assigned material
-    Material *m_pMaterial;
-    /// Number of stored indices.
-    unsigned int m_uiNumIndices;
-    /// Number of UV
-    unsigned int m_uiUVCoordinates[AI_MAX_NUMBER_OF_TEXTURECOORDS];
-    /// Material index.
-    unsigned int m_uiMaterialIndex;
-    /// True, if normals are stored.
-    bool m_hasNormals;
-    /// True, if vertex colors are stored.
-    bool m_hasVertexColors;
+    static constexpr unsigned int NoMaterial = ~0u;
 
-    /// Constructor
-    explicit Mesh(const std::string &name) :
-            m_name(name),
-            m_pMaterial(nullptr),
-            m_uiNumIndices(0),
-            m_uiMaterialIndex(NoMaterial),
-            m_hasNormals(false) {
-        memset(m_uiUVCoordinates, 0, sizeof(unsigned int) * AI_MAX_NUMBER_OF_TEXTURECOORDS);
+    std::string mName;                                              ///< The name for the mesh
+    std::vector<Face*> mFaces;                                      ///< Array with a pointer to all stored faces
+    Material *mMaterial{nullptr};                                   ///< Assigned material
+    unsigned int mNumIndices{0};                                    ///< Number of stored indices.
+    unsigned int mUVCoordinates[AI_MAX_NUMBER_OF_TEXTURECOORDS]{};  ///< Number of UV components
+    unsigned int mMaterialIndex{NoMaterial};                        ///< Material index.
+    bool mHasNormals{false};                                        ///< True, if normals are stored.
+
+    /// @brief Constructor
+    /// @paran [in] name    The mesh name
+    explicit Mesh(const std::string &name) : mName(name) {
+        memset(mUVCoordinates, 0, sizeof(unsigned int) * AI_MAX_NUMBER_OF_TEXTURECOORDS);
     }
 
-    /// Destructor
+    /// @brief Destructor
     ~Mesh() {
-        for (std::vector<Face *>::iterator it = m_Faces.begin();
-                it != m_Faces.end(); ++it) {
+        for (auto it = mFaces.begin(); it != mFaces.end(); ++it) {
             delete *it;
         }
     }
 };
 
 // ------------------------------------------------------------------------------------------------
-//! \struct Model
-//! \brief  Data structure to store all obj-specific model datas
+/// @struct Model
+/// @brief  Data structure to store all obj-specific model data
 // ------------------------------------------------------------------------------------------------
 struct Model {
-    typedef std::map<std::string, std::vector<unsigned int> *> GroupMap;
-    typedef std::map<std::string, std::vector<unsigned int> *>::iterator GroupMapIt;
-    typedef std::map<std::string, std::vector<unsigned int> *>::const_iterator ConstGroupMapIt;
+    using GroupMap = std::unordered_map<std::string, std::vector<unsigned int> *>;
+    using GroupMapIt = std::unordered_map<std::string, std::vector<unsigned int> *>::iterator;
+    using ConstGroupMapIt = std::unordered_map<std::string, std::vector<unsigned int> *>::const_iterator;
 
-    //! Model name
-    std::string m_ModelName;
-    //! List ob assigned objects
-    std::vector<Object *> m_Objects;
-    //! Pointer to current object
-    ObjFile::Object *m_pCurrent;
-    //! Pointer to current material
-    ObjFile::Material *m_pCurrentMaterial;
-    //! Pointer to default material
-    ObjFile::Material *m_pDefaultMaterial;
-    //! Vector with all generated materials
-    std::vector<std::string> m_MaterialLib;
-    //! Vector with all generated vertices
-    std::vector<aiVector3D> m_Vertices;
-    //! vector with all generated normals
-    std::vector<aiVector3D> m_Normals;
-    //! vector with all vertex colors
-    std::vector<aiVector3D> m_VertexColors;
-    //! Group map
-    GroupMap m_Groups;
-    //! Group to face id assignment
-    std::vector<unsigned int> *m_pGroupFaceIDs;
-    //! Active group
-    std::string m_strActiveGroup;
-    //! Vector with generated texture coordinates
-    std::vector<aiVector3D> m_TextureCoord;
-    //! Maximum dimension of texture coordinates
-    unsigned int m_TextureCoordDim;
-    //! Current mesh instance
-    Mesh *m_pCurrentMesh;
-    //! Vector with stored meshes
-    std::vector<Mesh *> m_Meshes;
-    //! Material map
-    std::map<std::string, Material *> m_MaterialMap;
+    std::string mModelName{};                               ///< Model name
+    std::vector<Object *> mObjects{};                       ///< List ob assigned objects
+    ObjFile::Object *mCurrentObject{nullptr};               ///< Pointer to the current object
+    ObjFile::Material *mCurrentMaterial{nullptr};           ///< Pointer to the current material
+    ObjFile::Material *mDefaultMaterial{nullptr};           ///< Pointer to default material
+    std::vector<std::string> mMaterialLib{};                ///< Vector with all generated materials
+    std::vector<aiVector3D> mVertices{};                    ///< Vector with all generated vertices
+    std::vector<aiVector3D> mNormals{};                     ///< vector with all generated normals
+    std::vector<aiVector3D> mVertexColors{};                ///< vector with all vertex colors
+    GroupMap mGroups{};                                     ///< Group map
+    std::vector<unsigned int> *mGroupFaceIDs{nullptr};      ///< Group to face id assignment
+    std::string mActiveGroup{};                             ///< Active group
+    std::vector<aiVector3D> mTextureCoord{};                ///< Vector with generated texture coordinates
+    unsigned int mTextureCoordDim{0};                       ///< Maximum dimension of texture coordinates
+    Mesh *mCurrentMesh{nullptr};                            ///< Current mesh instance
+    std::vector<Mesh *> mMeshes{};                          ///< Vector with stored meshes
+    std::unordered_map<std::string, Material*> mMaterialMap{};        ///< Material map
 
-    //! \brief  The default class constructor
-    Model() :
-            m_ModelName(""),
-            m_pCurrent(nullptr),
-            m_pCurrentMaterial(nullptr),
-            m_pDefaultMaterial(nullptr),
-            m_pGroupFaceIDs(nullptr),
-            m_strActiveGroup(""),
-            m_TextureCoordDim(0),
-            m_pCurrentMesh(nullptr) {
-        // empty
-    }
+    /// @brief  The default class constructor
+    Model() = default;
 
-    //! \brief  The class destructor
+    /// @brief  The class destructor
     ~Model() {
-        // Clear all stored object instances
-        for (std::vector<Object *>::iterator it = m_Objects.begin();
-                it != m_Objects.end(); ++it) {
-            delete *it;
+        for (auto & it : mObjects) {
+            delete it;
         }
-        m_Objects.clear();
-
-        // Clear all stored mesh instances
-        for (std::vector<Mesh *>::iterator it = m_Meshes.begin();
-                it != m_Meshes.end(); ++it) {
-            delete *it;
+        for (auto & Meshe : mMeshes) {
+            delete Meshe;
         }
-        m_Meshes.clear();
-
-        for (GroupMapIt it = m_Groups.begin(); it != m_Groups.end(); ++it) {
-            delete it->second;
+        for (auto & Group : mGroups) {
+            delete Group.second;
         }
-        m_Groups.clear();
-
-        for (std::map<std::string, Material *>::iterator it = m_MaterialMap.begin(); it != m_MaterialMap.end(); ++it) {
-            delete it->second;
+        for (auto & it : mMaterialMap) {
+            delete it.second;
         }
     }
 };
 
-// ------------------------------------------------------------------------------------------------
-
-} // Namespace ObjFile
-} // Namespace Assimp
+} // Namespace Assimp::ObjFile
 
 #endif // OBJ_FILEDATA_H_INC

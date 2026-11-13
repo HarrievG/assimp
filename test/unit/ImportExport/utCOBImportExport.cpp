@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -43,6 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <assimp/postprocess.h>
 #include <assimp/Importer.hpp>
+#include <array>
 
 using namespace Assimp;
 
@@ -63,9 +64,7 @@ TEST(utCOBImporter, importDwarf) {
 TEST(utCOBImporter, importMoleculeASCII) {
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/COB/molecule_ascii.cob", aiProcess_ValidateDataStructure);
-    // FIXME: this is wrong, it should succeed
-    // change to ASSERT_NE after it's been fixed
-    ASSERT_EQ(nullptr, scene);
+    ASSERT_NE(nullptr, scene);
 }
 
 TEST(utCOBImporter, importMolecule) {
@@ -96,4 +95,95 @@ TEST(utCOBImporter, importSpider66) {
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/COB/spider_6_6.cob", aiProcess_ValidateDataStructure);
     ASSERT_NE(nullptr, scene);
+}
+
+TEST(utCOBImporter, importInvalidHeader) {
+    Assimp::Importer importer;
+    constexpr char Header[] = "Caligari ??LZSCALEb";
+    const aiScene *scene = importer.ReadFileFromMemory(Header, sizeof(Header), aiProcess_ValidateDataStructure);
+    ASSERT_EQ(nullptr, scene);
+}
+
+namespace {
+
+std::vector<char> createCOBBinaryHeader() {
+    std::vector<char> data(32, ' ');
+    const char magic[] = "Caligari V00.01BLH";
+    std::memcpy(data.data(), magic, sizeof(magic) - 1);
+    data[31] = '\n';
+    return data;
+}
+
+void appendChunk(std::vector<char> &data, const char type[4], uint32_t id, const std::array<char, 4> &sizeBytes, size_t payloadZeros) {
+    data.insert(data.end(), type, type + 4);
+    data.insert(data.end(), 4, 0);
+    data.push_back(static_cast<char>(id & 0xFF));
+    data.push_back(static_cast<char>((id >> 8) & 0xFF));
+    data.push_back(static_cast<char>((id >> 16) & 0xFF));
+    data.push_back(static_cast<char>((id >> 24) & 0xFF));
+    data.insert(data.end(), 4, 0);
+    data.insert(data.end(), sizeBytes.begin(), sizeBytes.end());
+    if (payloadZeros > 0) {
+        data.insert(data.end(), payloadZeros, 0);
+    }
+}
+
+} // namespace
+
+TEST(utCOBImporter, chunkGuardLargeSizeNoSignedOverflow) {
+    Assimp::Importer importer;
+    auto data = createCOBBinaryHeader();
+    appendChunk(data, "PolH", 0, { { 0x00, 0x00, 0x00, static_cast<char>(0x80) } }, 112);
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_EQ(nullptr, scene);
+}
+
+TEST(utCOBImporter, chunkGuardMaxMinusOneSizeNoSignedOverflow) {
+    Assimp::Importer importer;
+    auto data = createCOBBinaryHeader();
+    appendChunk(data, "PolH", 0, { { static_cast<char>(0xFE), static_cast<char>(0xFF), static_cast<char>(0xFF), static_cast<char>(0xFF) } }, 112);
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_EQ(nullptr, scene);
+}
+
+TEST(utCOBImporter, chunkGuardValidChunkFollowedByEndChunk) {
+    Assimp::Importer importer;
+    auto data = createCOBBinaryHeader();
+    appendChunk(data, "PolH", 1, { { 112, 0x00, 0x00, 0x00 } }, 112);
+    appendChunk(data, "END ", 0, { { 0, 0, 0, 0 } }, 0);
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_NE(nullptr, scene);
+}
+
+TEST(utCOBImporter, chunkGuardValidChunkWithTrailerData) {
+    Assimp::Importer importer;
+    auto data = createCOBBinaryHeader();
+    appendChunk(data, "PolH", 1, { { 120, 0x00, 0x00, 0x00 } }, 112);
+    data.insert(data.end(), 8, 0x7F);
+    appendChunk(data, "END ", 0, { { 0, 0, 0, 0 } }, 0);
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_NE(nullptr, scene);
+}
+
+TEST(utCOBImporter, unsupportedChunkBinaryLargeSizeNoSignedOverflow) {
+    Assimp::Importer importer;
+    auto data = createCOBBinaryHeader();
+    appendChunk(data, "FooB", 0, { { 0x00, 0x00, 0x00, static_cast<char>(0x80) } }, 64);
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_EQ(nullptr, scene);
+}
+
+TEST(utCOBImporter, unsupportedChunkAsciiLargeSizeNoSignedOverflow) {
+    Assimp::Importer importer;
+    std::string data = "Caligari V00.01ALH               \n";
+    data += "FooB V00.01 Id 0000000001 Parent 0000000000 Size 2147483648\n";
+    data.append(64, ' ');
+
+    const aiScene *scene = importer.ReadFileFromMemory(data.data(), data.size(), 0, "cob");
+    EXPECT_EQ(nullptr, scene);
 }

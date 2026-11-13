@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -39,9 +38,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----------------------------------------------------------------------
 */
-
-
-
 #if !defined(ASSIMP_BUILD_NO_EXPORT) && !defined(ASSIMP_BUILD_NO_STL_EXPORTER)
 
 #include "STLExporter.h"
@@ -55,7 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using namespace Assimp;
 
-namespace Assimp    {
+namespace Assimp {
 
 // ------------------------------------------------------------------------------------------------
 // Worker function for exporting a scene to Stereolithograpy. Prototyped and registered in Exporter.cpp
@@ -69,7 +65,7 @@ void ExportSceneSTL(const char* pFile,IOSystem* pIOSystem, const aiScene* pScene
     if (exporter.mOutput.fail()) {
         throw DeadlyExportError("output data creation failed. Most likely the file became too large: " + std::string(pFile));
     }
-    
+
     // we're still here - export successfully completed. Write the file.
     std::unique_ptr<IOStream> outfile (pIOSystem->Open(pFile,"wt"));
     if (outfile == nullptr) {
@@ -78,6 +74,7 @@ void ExportSceneSTL(const char* pFile,IOSystem* pIOSystem, const aiScene* pScene
 
     outfile->Write( exporter.mOutput.str().c_str(), static_cast<size_t>(exporter.mOutput.tellp()),1);
 }
+
 void ExportSceneSTLBinary(const char* pFile,IOSystem* pIOSystem, const aiScene* pScene, const ExportProperties* pProperties )
 {
     bool exportPointClouds = pProperties->GetPropertyBool(AI_CONFIG_EXPORT_POINT_CLOUDS);
@@ -88,7 +85,7 @@ void ExportSceneSTLBinary(const char* pFile,IOSystem* pIOSystem, const aiScene* 
     if (exporter.mOutput.fail()) {
         throw DeadlyExportError("output data creation failed. Most likely the file became too large: " + std::string(pFile));
     }
-    
+
     // we're still here - export successfully completed. Write the file.
     std::unique_ptr<IOStream> outfile (pIOSystem->Open(pFile,"wb"));
     if (outfile == nullptr) {
@@ -100,13 +97,11 @@ void ExportSceneSTLBinary(const char* pFile,IOSystem* pIOSystem, const aiScene* 
 
 } // end of namespace Assimp
 
-static const char *SolidToken = "solid";
-static const char *EndSolidToken = "endsolid";
+static constexpr char SolidToken[]    = "solid";
+static constexpr char EndSolidToken[] = "endsolid";
 
 // ------------------------------------------------------------------------------------------------
-STLExporter::STLExporter(const char* _filename, const aiScene* pScene, bool exportPointClouds, bool binary)
-: filename(_filename)
-, endl("\n")
+STLExporter::STLExporter(const char* _filename, const aiScene* pScene, bool exportPointClouds, bool binary) : filename(_filename) , endl("\n")
 {
     // make sure that all formatting happens using the standard, C locale and not the user's current locale
     const std::locale& l = std::locale("C");
@@ -139,9 +134,9 @@ STLExporter::STLExporter(const char* _filename, const aiScene* pScene, bool expo
         if (exportPointClouds) {
             WritePointCloud("Assimp_Pointcloud", pScene );
             return;
-        } 
+        }
 
-        // Export the assimp mesh 
+        // Export the assimp mesh
         const std::string name = "AssimpScene";
         mOutput << SolidToken << " " << name << endl;
         for(unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
@@ -173,24 +168,26 @@ void STLExporter::WritePointCloud(const std::string &name, const aiScene* pScene
 }
 
 // ------------------------------------------------------------------------------------------------
-void STLExporter::WriteMesh(const aiMesh* m)
-{
+void STLExporter::WriteMesh(const aiMesh* m) {
     for (unsigned int i = 0; i < m->mNumFaces; ++i) {
         const aiFace& f = m->mFaces[i];
+        if (f.mNumIndices < 3) {
+            continue;
+        }
 
         // we need per-face normals. We specified aiProcess_GenNormals as pre-requisite for this exporter,
         // but nonetheless we have to expect per-vertex normals.
         aiVector3D nor;
         if (m->mNormals) {
-            for(unsigned int a = 0; a < f.mNumIndices; ++a) {
+            for (unsigned int a = 0; a < f.mNumIndices; ++a) {
                 nor += m->mNormals[f.mIndices[a]];
             }
             nor.NormalizeSafe();
         }
         mOutput << " facet normal " << nor.x << " " << nor.y << " " << nor.z << endl;
         mOutput << "  outer loop" << endl;
-        for(unsigned int a = 0; a < f.mNumIndices; ++a) {
-            const aiVector3D& v  = m->mVertices[f.mIndices[a]];
+        for (unsigned int a = 0; a < f.mNumIndices; ++a) {
+            const aiVector3D &v = m->mVertices[f.mIndices[a]];
             mOutput << "  vertex " << v.x << " " << v.y << " " << v.z << endl;
         }
 
@@ -199,10 +196,13 @@ void STLExporter::WriteMesh(const aiMesh* m)
     }
 }
 
-void STLExporter::WriteMeshBinary(const aiMesh* m)
-{
+void STLExporter::WriteMeshBinary(const aiMesh* m) {
     for (unsigned int i = 0; i < m->mNumFaces; ++i) {
         const aiFace& f = m->mFaces[i];
+        if (f.mNumIndices < 3) {
+            continue;
+        }
+
         // we need per-face normals. We specified aiProcess_GenNormals as pre-requisite for this exporter,
         // but nonetheless we have to expect per-vertex normals.
         aiVector3D nor;

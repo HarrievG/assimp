@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -57,7 +56,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma GCC system_header
 #endif
 
-#include <assimp/StringComparison.h>
 #include <assimp/ai_assert.h>
 #include <assimp/defs.h>
 
@@ -146,8 +144,8 @@ inline int ASSIMP_stricmp(const char *s1, const char *s2) {
 #else
     char c1, c2;
     do {
-        c1 = tolower(*s1++);
-        c2 = tolower(*s2++);
+        c1 = tolower((unsigned char)*(s1++));
+        c2 = tolower((unsigned char)*(s2++));
     } while (c1 && (c1 == c2));
     return c1 - c2;
 #endif
@@ -197,8 +195,8 @@ inline int ASSIMP_strincmp(const char *s1, const char *s2, unsigned int n) {
     unsigned int p = 0;
     do {
         if (p++ >= n) return 0;
-        c1 = tolower(*s1++);
-        c2 = tolower(*s2++);
+        c1 = tolower((unsigned char)*(s1++));
+        c2 = tolower((unsigned char)*(s2++));
     } while (c1 && (c1 == c2));
 
     return c1 - c2;

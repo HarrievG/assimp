@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -63,11 +62,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 struct aiMaterial;
 
-namespace Assimp    {
-namespace MDL   {
+namespace Assimp {
+namespace MDL {
 
 // -------------------------------------------------------------------------------------
-// to make it easier for us, we test the magic word against both "endianesses"
+// to make it easier for us, we test the magic word against both "endiannesses"
 
 // magic bytes used in Quake 1 MDL meshes
 #define AI_MDL_MAGIC_NUMBER_BE  AI_MAKE_MAGIC("IDPO")
@@ -603,7 +602,7 @@ struct Vertex_MDL7
     union {
         uint8_t norm162index;
         float norm[3];
-    };
+    } PACK_STRUCT;
 } PACK_STRUCT;
 
 // -------------------------------------------------------------------------------------
@@ -635,7 +634,7 @@ struct Frame_MDL7
     char    frame_name[AI_MDL7_MAX_FRAMENAMESIZE];
     uint32_t    vertices_count;
     uint32_t    transmatrix_count;
-};
+} PACK_STRUCT;
 
 
 // -------------------------------------------------------------------------------------
@@ -696,14 +695,16 @@ struct GroupFrame
     //! 0 = simple frame, !0 = group frame
     int32_t type;
 
+    int32_t numframes;
+
     //! Minimum vertex for all single frames
     Vertex min;
 
     //! Maximum vertex for all single frames
     Vertex max;
 
-    //! Time for all single frames
-    float *time;
+    //! List of times for all single frames
+    float *times;
 
     //! List of single frames
     SimpleFrame *frames;
@@ -874,7 +875,7 @@ struct IntSharedData_MDL7 {
         : apcOutBones(),
         iNum()
     {
-        abNeedMaterials.reserve(10);
+        abNeedMaterials.reserve(12);
     }
 
     //! Destruction: properly delete all allocated resources

@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2020, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -44,6 +44,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ObjFileMtlImporter.h"
 #include "ObjFileData.h"
 #include "ObjTools.h"
+#include <assimp/types.h>
+#include <assimp/DefaultIOSystem.h>
 #include <assimp/ParsingUtils.h>
 #include <assimp/fast_atof.h>
 #include <assimp/material.h>
@@ -53,151 +55,323 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace Assimp {
 
 // Material specific token (case insensitive compare)
-static const std::string DiffuseTexture = "map_Kd";
-static const std::string AmbientTexture = "map_Ka";
-static const std::string SpecularTexture = "map_Ks";
-static const std::string OpacityTexture = "map_d";
-static const std::string EmissiveTexture1 = "map_emissive";
-static const std::string EmissiveTexture2 = "map_Ke";
-static const std::string BumpTexture1 = "map_bump";
-static const std::string BumpTexture2 = "bump";
-static const std::string NormalTexture = "map_Kn";
-static const std::string ReflectionTexture = "refl";
-static const std::string DisplacementTexture1 = "map_disp";
-static const std::string DisplacementTexture2 = "disp";
-static const std::string SpecularityTexture = "map_ns";
+static constexpr char DiffuseTexture[] = "map_Kd";
+static constexpr char AmbientTexture[] = "map_Ka";
+static constexpr char SpecularTexture[] = "map_Ks";
+static constexpr char OpacityTexture[] = "map_d";
+static constexpr char EmissiveTexture1[] = "map_emissive";
+static constexpr char EmissiveTexture2[] = "map_Ke";
+static constexpr char BumpTexture1[] = "map_bump";
+static constexpr char BumpTexture2[] = "bump";
+static constexpr char NormalTextureV1[] = "map_Kn";
+static constexpr char NormalTextureV2[] = "norm";
+static constexpr char ReflectionTexture[] = "refl";
+static constexpr char DisplacementTexture1[] = "map_disp";
+static constexpr char DisplacementTexture2[] = "disp";
+static constexpr char SpecularityTexture[] = "map_ns";
+static constexpr char RoughnessTexture[] = "map_Pr";
+static constexpr char MetallicTexture[] = "map_Pm";
+static constexpr char SheenTexture[] = "map_Ps";
+static constexpr char RMATexture[] = "map_Ps";
 
 // texture option specific token
-static const std::string BlendUOption = "-blendu";
-static const std::string BlendVOption = "-blendv";
-static const std::string BoostOption = "-boost";
-static const std::string ModifyMapOption = "-mm";
-static const std::string OffsetOption = "-o";
-static const std::string ScaleOption = "-s";
-static const std::string TurbulenceOption = "-t";
-static const std::string ResolutionOption = "-texres";
-static const std::string ClampOption = "-clamp";
-static const std::string BumpOption = "-bm";
-static const std::string ChannelOption = "-imfchan";
-static const std::string TypeOption = "-type";
+static constexpr char BlendUOption[] = "-blendu";
+static constexpr char BlendVOption[] = "-blendv";
+static constexpr char BoostOption[] = "-boost";
+static constexpr char ModifyMapOption[] = "-mm";
+static constexpr char OffsetOption[] = "-o";
+static constexpr char ScaleOption[] = "-s";
+static constexpr char TurbulenceOption[] = "-t";
+static constexpr char ResolutionOption[] = "-texres";
+static constexpr char ClampOption[] = "-clamp";
+static constexpr char BumpOption[] = "-bm";
+static constexpr char ChannelOption[] = "-imfchan";
+static constexpr char TypeOption[] = "-type";
 
 // -------------------------------------------------------------------
 //  Constructor
-ObjFileMtlImporter::ObjFileMtlImporter(std::vector<char> &buffer,
-        const std::string &,
-        ObjFile::Model *pModel) :
-        m_DataIt(buffer.begin()),
-        m_DataItEnd(buffer.end()),
-        m_pModel(pModel),
-        m_uiLine(0),
-        m_buffer() {
-    ai_assert(nullptr != m_pModel);
-    m_buffer.resize(BUFFERSIZE);
-    std::fill(m_buffer.begin(), m_buffer.end(), '\0');
-    if (nullptr == m_pModel->m_pDefaultMaterial) {
-        m_pModel->m_pDefaultMaterial = new ObjFile::Material;
-        m_pModel->m_pDefaultMaterial->MaterialName.Set("default");
+ObjFileMtlImporter::ObjFileMtlImporter(std::vector<char> &buffer, const std::string &strAbsPath, ObjFile::Model *pModel) :
+        mAbsPath(strAbsPath),
+        mDataIt(buffer.begin()),
+        mDataItEnd(buffer.end()),
+        mModel(pModel) {
+    ai_assert(nullptr != mModel);
+    mBuffer.resize(BUFFERSIZE);
+    std::fill(mBuffer.begin(), mBuffer.end(), '\0');
+    if (nullptr == mModel->mDefaultMaterial) {
+        mModel->mDefaultMaterial = new ObjFile::Material;
+        mModel->mDefaultMaterial->MaterialName.Set("default");
+    }
+
+    // Try with OS folder separator first
+    char folderSeparator = DefaultIOSystem().getOsSeparator();
+    std::size_t found = mAbsPath.find_last_of(folderSeparator);
+    if (found == std::string::npos) {
+        // Not found, try alternative folder separator
+        folderSeparator = (folderSeparator == '/' ? '\\' : '/');
+        found = mAbsPath.find_last_of(folderSeparator);
+    }
+    if (found != std::string::npos) {
+        mAbsPath = mAbsPath.substr(0, found + 1);
+    } else {
+        mAbsPath = "";
     }
     load();
 }
 
 // -------------------------------------------------------------------
-//  Destructor
-ObjFileMtlImporter::~ObjFileMtlImporter() {
-    // empty
-}
-
-// -------------------------------------------------------------------
 //  Loads the material description
 void ObjFileMtlImporter::load() {
-    if (m_DataIt == m_DataItEnd)
+    if (mDataIt == mDataItEnd) {
         return;
+    }
 
-    while (m_DataIt != m_DataItEnd) {
-        switch (*m_DataIt) {
+    while (mDataIt != mDataItEnd) {
+        switch (*mDataIt) {
             case 'k':
             case 'K': {
-                ++m_DataIt;
-                if (*m_DataIt == 'a') // Ambient color
-                {
-                    ++m_DataIt;
-                    getColorRGBA(&m_pModel->m_pCurrentMaterial->ambient);
-                } else if (*m_DataIt == 'd') {
+                ++mDataIt;
+                if (*mDataIt == 'a') { // Ambient color
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getColorRGBA(&mModel->mCurrentMaterial->ambient);
+                    }
+                } else if (*mDataIt == 'd') {
                     // Diffuse color
-                    ++m_DataIt;
-                    getColorRGBA(&m_pModel->m_pCurrentMaterial->diffuse);
-                } else if (*m_DataIt == 's') {
-                    ++m_DataIt;
-                    getColorRGBA(&m_pModel->m_pCurrentMaterial->specular);
-                } else if (*m_DataIt == 'e') {
-                    ++m_DataIt;
-                    getColorRGBA(&m_pModel->m_pCurrentMaterial->emissive);
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getColorRGBA(&mModel->mCurrentMaterial->diffuse);
+                    }
+                } else if (*mDataIt == 's') {
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getColorRGBA(&mModel->mCurrentMaterial->specular);
+                    }
+                } else if (*mDataIt == 'e') {
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getColorRGBA(&mModel->mCurrentMaterial->emissive);
+                    }
                 }
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
             case 'T': {
-                ++m_DataIt;
+                ++mDataIt;
                 // Material transmission color
-                if (*m_DataIt == 'f')  {
-                    ++m_DataIt;
-                    getColorRGBA(&m_pModel->m_pCurrentMaterial->transparent);
-                } else if (*m_DataIt == 'r')  {
+                if (*mDataIt == 'f')  {
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getColorRGBA(&mModel->mCurrentMaterial->transparent);
+                    }
+                } else if (*mDataIt == 'r')  {
                     // Material transmission alpha value
-                    ++m_DataIt;
+                    ++mDataIt;
                     ai_real d;
                     getFloatValue(d);
-                    m_pModel->m_pCurrentMaterial->alpha = static_cast<ai_real>(1.0) - d;                    
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        mModel->mCurrentMaterial->alpha = static_cast<ai_real>(1.0) - d;
+                    }
                 }
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
             case 'd': {
-                if (*(m_DataIt + 1) == 'i' && *(m_DataIt + 2) == 's' && *(m_DataIt + 3) == 'p') {
+                if (*(mDataIt + 1) == 'i' && *(mDataIt + 2) == 's' && *(mDataIt + 3) == 'p') {
                     // A displacement map
                     getTexture();
                 } else {
                     // Alpha value
-                    ++m_DataIt;
-                    getFloatValue(m_pModel->m_pCurrentMaterial->alpha);
-                    m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                    ++mDataIt;
+                    if (mModel->mCurrentMaterial != nullptr) {
+                        getFloatValue(mModel->mCurrentMaterial->alpha);
+                    }
+                    mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
                 }
             } break;
 
             case 'N':
             case 'n': {
-                ++m_DataIt;
-                switch (*m_DataIt) {
+                ++mDataIt;
+                switch (*mDataIt) {
                     case 's': // Specular exponent
-                        ++m_DataIt;
-                        getFloatValue(m_pModel->m_pCurrentMaterial->shineness);
+                        ++mDataIt;
+                        if (mModel->mCurrentMaterial != nullptr) {
+                            getFloatValue(mModel->mCurrentMaterial->shineness);
+                        }
                         break;
                     case 'i': // Index Of refraction
-                        ++m_DataIt;
-                        getFloatValue(m_pModel->m_pCurrentMaterial->ior);
+                        ++mDataIt;
+                        if (mModel->mCurrentMaterial != nullptr) {
+                            getFloatValue(mModel->mCurrentMaterial->ior);
+                        }
                         break;
                     case 'e': // New material
                         createMaterial();
                         break;
+                    case 'o': // Norm texture
+                        --mDataIt;
+                        getTexture();
+                        break;
                 }
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
 
-            case 'm': // Texture
+            case 'P':
+                {
+                    ++mDataIt;
+                    switch(*mDataIt) {
+                    case 'r':
+                        ++mDataIt;
+                        if (mModel->mCurrentMaterial != nullptr) {
+                            getFloatValue(mModel->mCurrentMaterial->roughness);
+                        }
+                        break;
+                    case 'm':
+                        ++mDataIt;
+                        if (mModel->mCurrentMaterial != nullptr) {
+                            getFloatValue(mModel->mCurrentMaterial->metallic);
+                        }
+                        break;
+                    case 's':
+                        ++mDataIt;
+                        if (mModel->mCurrentMaterial != nullptr) {
+                            getColorRGBA(mModel->mCurrentMaterial->sheen);
+                        }
+                        break;
+                    case 'c':
+                        ++mDataIt;
+                        if (*mDataIt == 'r') {
+                            ++mDataIt;
+                            if (mModel->mCurrentMaterial != nullptr) {
+                                getFloatValue(mModel->mCurrentMaterial->clearcoat_roughness);
+                            }
+                        } else if (*mDataIt == 't') {
+                            ++mDataIt;
+                            if (mModel->mCurrentMaterial != nullptr) {
+                                getFloatValue(mModel->mCurrentMaterial->clearcoat_thickness);
+                            }
+                        } else {
+                            if (mModel->mCurrentMaterial != nullptr) {
+                                getFloatValue(mModel->mCurrentMaterial->clearcoat);
+                            }
+                        }
+                        break;
+                    }
+                    mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+                }
+                break;
+            
+            case 'm': // Texture or metallic
+            {
+                // Save start of token (after 'm')
+                auto tokenStart = mDataIt;  // points to 'm'
+                auto tokenEnd = getNextDelimiter(mDataIt, mDataItEnd); // move iterator to end of token
+
+                std::string_view svKeyword(&(*tokenStart), static_cast<size_t>(&(*tokenEnd) - &(*tokenStart)));
+                mDataIt = getNextWord(tokenEnd, mDataItEnd); // advance iterator
+
+                if (svKeyword.size() >= 3 && svKeyword.compare(0, 3, "map") == 0) {
+                    // starts with "map", treat as texture map
+                    mDataIt = tokenStart;
+                    getTexture();
+                } else if (svKeyword == "metallic" || svKeyword == "metal" || svKeyword == "metalness") {
+                    // parse metallic float value instead of texture
+                    getFloatIfMaterialValid(&ObjFile::Material::metallic);
+                }
+
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+            } break;
+
             case 'b': // quick'n'dirty - for 'bump' sections
-            case 'r': // quick'n'dirty - for 'refl' sections
             {
                 getTexture();
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+            } break;
+
+            case 'r': // refl (map) or roughness (float)
+            {
+                auto tokenStart = mDataIt;  // points to 'r'
+                auto tokenEnd = getNextDelimiter(mDataIt, mDataItEnd);
+                std::string_view svKeyword(&(*tokenStart), static_cast<size_t>(&(*tokenEnd) - &(*tokenStart)));
+                mDataIt = getNextWord(tokenEnd, mDataItEnd);
+
+                if (svKeyword == "roughness" || svKeyword == "rough") {
+                    getFloatIfMaterialValid(&ObjFile::Material::roughness);
+                } else if (svKeyword == "refl" || svKeyword == "reflection") {
+                    mDataIt = tokenStart;
+                    getTexture();
+                }
+
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
 
             case 'i': // Illumination model
             {
-                m_DataIt = getNextToken<DataArrayIt>(m_DataIt, m_DataItEnd);
-                getIlluminationModel(m_pModel->m_pCurrentMaterial->illumination_model);
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
+                if (mModel->mCurrentMaterial != nullptr) {
+                    getIlluminationModel(mModel->mCurrentMaterial->illumination_model);
+                }
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+            } break;
+
+            case 'a': {
+                auto tokenStart = mDataIt;
+                auto tokenEnd = getNextDelimiter(mDataIt, mDataItEnd);
+                std::string_view svKeyword(&(*tokenStart), static_cast<size_t>(&(*tokenEnd) - &(*tokenStart)));
+                mDataIt = getNextWord(tokenEnd, mDataItEnd);
+
+                if (svKeyword == "aniso" || svKeyword == "anisotropy") {
+                    getFloatIfMaterialValid(&ObjFile::Material::anisotropy);
+                } else if (svKeyword == "ao") {
+                    getFloatIfMaterialValid(&ObjFile::Material::ambient_occlusion);
+                } else if (svKeyword == "anisor" || svKeyword == "anisotropicrotation") {
+                    getFloatIfMaterialValid(&ObjFile::Material::anisotropy_rotation);
+                } else {
+                    ASSIMP_LOG_WARN("Unhandled keyword: ", svKeyword);
+                }
+
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+            } break;
+
+            case 's': {
+                auto tokenStart = mDataIt;
+                auto tokenEnd = getNextDelimiter(mDataIt, mDataItEnd);
+                std::string_view svKeyword(&(*tokenStart), static_cast<size_t>(&(*tokenEnd) - &(*tokenStart)));
+                mDataIt = getNextWord(tokenEnd, mDataItEnd);
+
+                if (svKeyword == "subsurface" || svKeyword == "scattering") {
+                    getFloatIfMaterialValid(&ObjFile::Material::subsurface_scattering);
+                } else if (svKeyword == "speculartint") {
+                    getFloatIfMaterialValid(&ObjFile::Material::specular_tint);
+                } else if (svKeyword == "sheen") {
+                    getFloatIfMaterialValid(&ObjFile::Material::sheen_grazing);
+                } else if (svKeyword == "sheentint") {
+                    getFloatIfMaterialValid(&ObjFile::Material::sheen_tint);
+                } else {
+                    ASSIMP_LOG_WARN("Unhandled keyword: ", svKeyword);
+                }
+
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
+            } break;
+
+            case 'c': {
+                auto tokenStart = mDataIt;
+                auto tokenEnd = getNextDelimiter(mDataIt, mDataItEnd);
+                std::string_view svKeyword(&(*tokenStart), static_cast<size_t>(&(*tokenEnd) - &(*tokenStart)));
+                mDataIt = getNextWord(tokenEnd, mDataItEnd);
+
+                if (svKeyword == "clearcoat") {
+                    getFloatIfMaterialValid(&ObjFile::Material::clearcoat);
+                } else if (svKeyword == "clearcoatgloss") {
+                    getFloatIfMaterialValid(&ObjFile::Material::clearcoat_gloss);
+                } else {
+                    ASSIMP_LOG_WARN("Unhandled keyword: ", svKeyword);
+                }
+
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
 
             default: {
-                m_DataIt = skipLine<DataArrayIt>(m_DataIt, m_DataItEnd, m_uiLine);
+                mDataIt = skipLine<DataArrayIt>(mDataIt, mDataItEnd, mLine);
             } break;
         }
     }
@@ -209,124 +383,193 @@ void ObjFileMtlImporter::getColorRGBA(aiColor3D *pColor) {
     ai_assert(nullptr != pColor);
 
     ai_real r(0.0), g(0.0), b(0.0);
-    m_DataIt = getFloat<DataArrayIt>(m_DataIt, m_DataItEnd, r);
+    mDataIt = getFloat<DataArrayIt>(mDataIt, mDataItEnd, r);
     pColor->r = r;
 
     // we have to check if color is default 0 with only one token
-    if (!IsLineEnd(*m_DataIt)) {
-        m_DataIt = getFloat<DataArrayIt>(m_DataIt, m_DataItEnd, g);
-        m_DataIt = getFloat<DataArrayIt>(m_DataIt, m_DataItEnd, b);
+    if (!IsLineEnd(*mDataIt)) {
+        mDataIt = getFloat<DataArrayIt>(mDataIt, mDataItEnd, g);
+        mDataIt = getFloat<DataArrayIt>(mDataIt, mDataItEnd, b);
     }
     pColor->g = g;
     pColor->b = b;
 }
 
 // -------------------------------------------------------------------
+void ObjFileMtlImporter::getColorRGBA(Maybe<aiColor3D> &value) {
+    aiColor3D v;
+    getColorRGBA(&v);
+    value = Maybe<aiColor3D>(v);
+}
+
+// -------------------------------------------------------------------
 //  Loads the kind of illumination model.
 void ObjFileMtlImporter::getIlluminationModel(int &illum_model) {
-    m_DataIt = CopyNextWord<DataArrayIt>(m_DataIt, m_DataItEnd, &m_buffer[0], BUFFERSIZE);
-    illum_model = atoi(&m_buffer[0]);
+    mDataIt = CopyNextWord<DataArrayIt>(mDataIt, mDataItEnd, &mBuffer[0], BUFFERSIZE);
+    illum_model = atoi(&mBuffer[0]);
 }
 
 // -------------------------------------------------------------------
 //  Loads a single float value.
 void ObjFileMtlImporter::getFloatValue(ai_real &value) {
-    m_DataIt = CopyNextWord<DataArrayIt>(m_DataIt, m_DataItEnd, &m_buffer[0], BUFFERSIZE);
-    value = (ai_real)fast_atof(&m_buffer[0]);
+    mDataIt = CopyNextWord<DataArrayIt>(mDataIt, mDataItEnd, &mBuffer[0], BUFFERSIZE);
+    const size_t len = std::strlen(&mBuffer[0]);
+    if (0 == len) {
+        value = 0.0f;
+        return;
+    }
+
+    value = fast_atof(&mBuffer[0]);
+}
+
+// -------------------------------------------------------------------
+void ObjFileMtlImporter::getFloatValue(Maybe<ai_real> &value) {
+    mDataIt = CopyNextWord<DataArrayIt>(mDataIt, mDataItEnd, &mBuffer[0], BUFFERSIZE);
+    const size_t len = std::strlen(&mBuffer[0]);
+    if (len) {
+        value = Maybe<ai_real>(fast_atof(&mBuffer[0]));
+    } else {
+        value = Maybe<ai_real>();
+    }
+}
+
+// -------------------------------------------------------------------
+//  Writes a loaded single float value if material not null
+void ObjFileMtlImporter::getFloatIfMaterialValid(ai_real ObjFile::Material::*member) {
+    if (mModel != nullptr && mModel->mCurrentMaterial != nullptr) {
+        // This will call getFloatValue(ai_real&)
+        getFloatValue(mModel->mCurrentMaterial->*member);
+    }
+}
+
+// -------------------------------------------------------------------
+void ObjFileMtlImporter::getFloatIfMaterialValid(Maybe<ai_real> ObjFile::Material::*member) {
+    // It can directly access `m_pModel` because it's part of the class
+    if (mModel != nullptr && mModel->mCurrentMaterial != nullptr) {
+        getFloatValue(mModel->mCurrentMaterial->*member);
+    }
 }
 
 // -------------------------------------------------------------------
 //  Creates a material from loaded data.
 void ObjFileMtlImporter::createMaterial() {
-    std::string line;
-    while (!IsLineEnd(*m_DataIt)) {
-        line += *m_DataIt;
-        ++m_DataIt;
+    // Parse the line directly without creating a temporary string
+    auto lineStart = mDataIt;
+    while (!IsLineEnd(*mDataIt)) {
+        ++mDataIt;
     }
-
-    std::vector<std::string> token;
-    const unsigned int numToken = tokenize<std::string>(line, token, " \t");
+    
+    // Get the line as string_view
+    std::string_view svLine(&(*lineStart), static_cast<size_t>(&*mDataIt - &*lineStart));
+    svLine = trimStringView(svLine);
+    
     std::string name;
-    if (numToken == 1) {
+    if (svLine.empty() || svLine == "newmtl") {
         name = AI_DEFAULT_MATERIAL_NAME;
     } else {
         // skip newmtl and all following white spaces
-        std::size_t first_ws_pos = line.find_first_of(" \t");
-        std::size_t first_non_ws_pos = line.find_first_not_of(" \t", first_ws_pos);
-        if (first_non_ws_pos != std::string::npos) {
-            name = line.substr(first_non_ws_pos);
+        size_t first_ws_pos = svLine.find_first_of(" \t");
+        size_t first_non_ws_pos = std::string_view::npos;
+        if (first_ws_pos != std::string_view::npos) {
+            first_non_ws_pos = svLine.find_first_not_of(" \t", first_ws_pos);
+        }
+        if (first_non_ws_pos != std::string_view::npos) {
+            name = std::string(svLine.substr(first_non_ws_pos));
+        } else {
+            name = AI_DEFAULT_MATERIAL_NAME;
         }
     }
 
-    name = trim_whitespaces(name);
+    name = ai_trim(name);
 
-    std::map<std::string, ObjFile::Material *>::iterator it = m_pModel->m_MaterialMap.find(name);
-    if (m_pModel->m_MaterialMap.end() == it) {
+    std::unordered_map<std::string, ObjFile::Material *>::iterator it = mModel->mMaterialMap.find(name);
+    if (mModel->mMaterialMap.end() == it) {
         // New Material created
-        m_pModel->m_pCurrentMaterial = new ObjFile::Material();
-        m_pModel->m_pCurrentMaterial->MaterialName.Set(name);
-        m_pModel->m_MaterialLib.push_back(name);
-        m_pModel->m_MaterialMap[name] = m_pModel->m_pCurrentMaterial;
+        mModel->mCurrentMaterial = new ObjFile::Material();
+        mModel->mCurrentMaterial->MaterialName.Set(name);
+        mModel->mMaterialLib.push_back(name);
+        mModel->mMaterialMap[name] = mModel->mCurrentMaterial;
 
-        if (m_pModel->m_pCurrentMesh) {
-            m_pModel->m_pCurrentMesh->m_uiMaterialIndex = static_cast<unsigned int>(m_pModel->m_MaterialLib.size() - 1);
+        if (mModel->mCurrentMesh) {
+            mModel->mCurrentMesh->mMaterialIndex = static_cast<unsigned int>(mModel->mMaterialLib.size() - 1);
         }
     } else {
         // Use older material
-        m_pModel->m_pCurrentMaterial = (*it).second;
+        mModel->mCurrentMaterial = it->second;
     }
 }
 
 // -------------------------------------------------------------------
 //  Gets a texture name from data.
 void ObjFileMtlImporter::getTexture() {
-    aiString *out(nullptr);
+    aiString *out = nullptr;
     int clampIndex = -1;
 
-    const char *pPtr(&(*m_DataIt));
-    if (!ASSIMP_strincmp(pPtr, DiffuseTexture.c_str(), static_cast<unsigned int>(DiffuseTexture.size()))) {
+    if (mModel->mCurrentMaterial == nullptr) {
+        mModel->mCurrentMaterial = new ObjFile::Material();
+        mModel->mCurrentMaterial->MaterialName.Set("Empty_Material");
+        mModel->mMaterialMap["Empty_Material"] = mModel->mCurrentMaterial;
+    }
+
+    if (const char *pPtr(&*mDataIt); !ASSIMP_strincmp(pPtr, DiffuseTexture, static_cast<unsigned int>(strlen(DiffuseTexture)))) {
         // Diffuse texture
-        out = &m_pModel->m_pCurrentMaterial->texture;
+        out = &mModel->mCurrentMaterial->texture;
         clampIndex = ObjFile::Material::TextureDiffuseType;
-    } else if (!ASSIMP_strincmp(pPtr, AmbientTexture.c_str(), static_cast<unsigned int>(AmbientTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, AmbientTexture, static_cast<unsigned int>(strlen(AmbientTexture)))) {
         // Ambient texture
-        out = &m_pModel->m_pCurrentMaterial->textureAmbient;
+        out = &mModel->mCurrentMaterial->textureAmbient;
         clampIndex = ObjFile::Material::TextureAmbientType;
-    } else if (!ASSIMP_strincmp(pPtr, SpecularTexture.c_str(), static_cast<unsigned int>(SpecularTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, SpecularTexture, static_cast<unsigned int>(strlen(SpecularTexture)))) {
         // Specular texture
-        out = &m_pModel->m_pCurrentMaterial->textureSpecular;
+        out = &mModel->mCurrentMaterial->textureSpecular;
         clampIndex = ObjFile::Material::TextureSpecularType;
-    } else if (!ASSIMP_strincmp(pPtr, DisplacementTexture1.c_str(), static_cast<unsigned int>(DisplacementTexture1.size())) ||
-               !ASSIMP_strincmp(pPtr, DisplacementTexture2.c_str(), static_cast<unsigned int>(DisplacementTexture2.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, DisplacementTexture1, static_cast<unsigned int>(strlen(DisplacementTexture1))) ||
+               !ASSIMP_strincmp(pPtr, DisplacementTexture2, static_cast<unsigned int>(strlen(DisplacementTexture2)))) {
         // Displacement texture
-        out = &m_pModel->m_pCurrentMaterial->textureDisp;
+        out = &mModel->mCurrentMaterial->textureDisp;
         clampIndex = ObjFile::Material::TextureDispType;
-    } else if (!ASSIMP_strincmp(pPtr, OpacityTexture.c_str(), static_cast<unsigned int>(OpacityTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, OpacityTexture, static_cast<unsigned int>(strlen(OpacityTexture)))) {
         // Opacity texture
-        out = &m_pModel->m_pCurrentMaterial->textureOpacity;
+        out = &mModel->mCurrentMaterial->textureOpacity;
         clampIndex = ObjFile::Material::TextureOpacityType;
-    } else if (!ASSIMP_strincmp(pPtr, EmissiveTexture1.c_str(), static_cast<unsigned int>(EmissiveTexture1.size())) ||
-               !ASSIMP_strincmp(pPtr, EmissiveTexture2.c_str(), static_cast<unsigned int>(EmissiveTexture2.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, EmissiveTexture1, static_cast<unsigned int>(strlen(EmissiveTexture1))) ||
+               !ASSIMP_strincmp(pPtr, EmissiveTexture2, static_cast<unsigned int>(strlen(EmissiveTexture2)))) {
         // Emissive texture
-        out = &m_pModel->m_pCurrentMaterial->textureEmissive;
+        out = &mModel->mCurrentMaterial->textureEmissive;
         clampIndex = ObjFile::Material::TextureEmissiveType;
-    } else if (!ASSIMP_strincmp(pPtr, BumpTexture1.c_str(), static_cast<unsigned int>(BumpTexture1.size())) ||
-               !ASSIMP_strincmp(pPtr, BumpTexture2.c_str(), static_cast<unsigned int>(BumpTexture2.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, BumpTexture1, static_cast<unsigned int>(strlen(BumpTexture1))) ||
+               !ASSIMP_strincmp(pPtr, BumpTexture2, static_cast<unsigned int>(strlen(BumpTexture2)))) {
         // Bump texture
-        out = &m_pModel->m_pCurrentMaterial->textureBump;
+        out = &mModel->mCurrentMaterial->textureBump;
         clampIndex = ObjFile::Material::TextureBumpType;
-    } else if (!ASSIMP_strincmp(pPtr, NormalTexture.c_str(), static_cast<unsigned int>(NormalTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, NormalTextureV1, static_cast<unsigned int>(strlen(NormalTextureV1))) || !ASSIMP_strincmp(pPtr, NormalTextureV2, static_cast<unsigned int>(strlen(NormalTextureV2)))) {
         // Normal map
-        out = &m_pModel->m_pCurrentMaterial->textureNormal;
+        out = &mModel->mCurrentMaterial->textureNormal;
         clampIndex = ObjFile::Material::TextureNormalType;
-    } else if (!ASSIMP_strincmp(pPtr, ReflectionTexture.c_str(), static_cast<unsigned int>(ReflectionTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, ReflectionTexture, static_cast<unsigned int>(strlen(ReflectionTexture)))) {
         // Reflection texture(s)
         //Do nothing here
         return;
-    } else if (!ASSIMP_strincmp(pPtr, SpecularityTexture.c_str(), static_cast<unsigned int>(SpecularityTexture.size()))) {
+    } else if (!ASSIMP_strincmp(pPtr, SpecularityTexture, static_cast<unsigned int>(strlen(SpecularityTexture)))) {
         // Specularity scaling (glossiness)
-        out = &m_pModel->m_pCurrentMaterial->textureSpecularity;
+        out = &mModel->mCurrentMaterial->textureSpecularity;
         clampIndex = ObjFile::Material::TextureSpecularityType;
+    } else if ( !ASSIMP_strincmp( pPtr, RoughnessTexture, static_cast<unsigned int>(strlen(RoughnessTexture)))) {
+        // PBR Roughness texture
+        out = & mModel->mCurrentMaterial->textureRoughness;
+        clampIndex = ObjFile::Material::TextureRoughnessType;
+    } else if ( !ASSIMP_strincmp( pPtr, MetallicTexture, static_cast<unsigned int>(strlen(MetallicTexture)))) {
+        // PBR Metallic texture
+        out = & mModel->mCurrentMaterial->textureMetallic;
+        clampIndex = ObjFile::Material::TextureMetallicType;
+    } else if (!ASSIMP_strincmp( pPtr, SheenTexture, static_cast<unsigned int>(strlen(SheenTexture)))) {
+        // PBR Sheen (reflectance) texture
+        out = & mModel->mCurrentMaterial->textureSheen;
+        clampIndex = ObjFile::Material::TextureSheenType;
+    } else if (!ASSIMP_strincmp( pPtr, RMATexture, static_cast<unsigned int>(strlen(RMATexture)))) {
+        // PBR Rough/Metal/AO texture
+        out = & mModel->mCurrentMaterial->textureRMA;
+        clampIndex = ObjFile::Material::TextureRMAType;
     } else {
         ASSIMP_LOG_ERROR("OBJ/MTL: Encountered unknown texture type");
         return;
@@ -334,12 +577,12 @@ void ObjFileMtlImporter::getTexture() {
 
     bool clamp = false;
     getTextureOption(clamp, clampIndex, out);
-    m_pModel->m_pCurrentMaterial->clamp[clampIndex] = clamp;
+    mModel->mCurrentMaterial->clamp[clampIndex] = clamp;
 
     std::string texture;
-    m_DataIt = getName<DataArrayIt>(m_DataIt, m_DataItEnd, texture);
+    mDataIt = getName<DataArrayIt>(mDataIt, mDataItEnd, texture);
     if (nullptr != out) {
-        out->Set(texture);
+        out->Set(mAbsPath + texture);
     }
 }
 
@@ -359,66 +602,74 @@ void ObjFileMtlImporter::getTexture() {
  * /////////////////////////////////////////////////////////////////////////////
  */
 void ObjFileMtlImporter::getTextureOption(bool &clamp, int &clampIndex, aiString *&out) {
-    m_DataIt = getNextToken<DataArrayIt>(m_DataIt, m_DataItEnd);
+    mDataIt = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
 
     // If there is any more texture option
-    while (!isEndOfBuffer(m_DataIt, m_DataItEnd) && *m_DataIt == '-') {
-        const char *pPtr(&(*m_DataIt));
+    while (!isEndOfBuffer(mDataIt, mDataItEnd) && *mDataIt == '-') {
+        const char *pPtr(&*mDataIt);
         //skip option key and value
         int skipToken = 1;
 
-        if (!ASSIMP_strincmp(pPtr, ClampOption.c_str(), static_cast<unsigned int>(ClampOption.size()))) {
-            DataArrayIt it = getNextToken<DataArrayIt>(m_DataIt, m_DataItEnd);
+        if (!ASSIMP_strincmp(pPtr, ClampOption, static_cast<unsigned int>(strlen(ClampOption)))) {
+            const DataArrayIt it = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
             char value[3];
-            CopyNextWord(it, m_DataItEnd, value, sizeof(value) / sizeof(*value));
+            CopyNextWord(it, mDataItEnd, value, sizeof(value) / sizeof(*value));
             if (!ASSIMP_strincmp(value, "on", 2)) {
                 clamp = true;
             }
 
             skipToken = 2;
-        } else if (!ASSIMP_strincmp(pPtr, TypeOption.c_str(), static_cast<unsigned int>(TypeOption.size()))) {
-            DataArrayIt it = getNextToken<DataArrayIt>(m_DataIt, m_DataItEnd);
+        } else if (!ASSIMP_strincmp(pPtr, TypeOption, static_cast<unsigned int>(strlen(TypeOption)))) {
+            DataArrayIt it = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
             char value[12];
-            CopyNextWord(it, m_DataItEnd, value, sizeof(value) / sizeof(*value));
+            CopyNextWord(it, mDataItEnd, value, sizeof(value) / sizeof(*value));
             if (!ASSIMP_strincmp(value, "cube_top", 8)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeTopType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[0];
+                out = &mModel->mCurrentMaterial->textureReflection[0];
             } else if (!ASSIMP_strincmp(value, "cube_bottom", 11)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeBottomType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[1];
+                out = &mModel->mCurrentMaterial->textureReflection[1];
             } else if (!ASSIMP_strincmp(value, "cube_front", 10)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeFrontType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[2];
+                out = &mModel->mCurrentMaterial->textureReflection[2];
             } else if (!ASSIMP_strincmp(value, "cube_back", 9)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeBackType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[3];
+                out = &mModel->mCurrentMaterial->textureReflection[3];
             } else if (!ASSIMP_strincmp(value, "cube_left", 9)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeLeftType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[4];
+                out = &mModel->mCurrentMaterial->textureReflection[4];
             } else if (!ASSIMP_strincmp(value, "cube_right", 10)) {
                 clampIndex = ObjFile::Material::TextureReflectionCubeRightType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[5];
+                out = &mModel->mCurrentMaterial->textureReflection[5];
             } else if (!ASSIMP_strincmp(value, "sphere", 6)) {
                 clampIndex = ObjFile::Material::TextureReflectionSphereType;
-                out = &m_pModel->m_pCurrentMaterial->textureReflection[0];
+                out = &mModel->mCurrentMaterial->textureReflection[0];
             }
 
             skipToken = 2;
-        } else if (!ASSIMP_strincmp(pPtr, BlendUOption.c_str(), static_cast<unsigned int>(BlendUOption.size())) || !ASSIMP_strincmp(pPtr, BlendVOption.c_str(), static_cast<unsigned int>(BlendVOption.size())) || !ASSIMP_strincmp(pPtr, BoostOption.c_str(), static_cast<unsigned int>(BoostOption.size())) || !ASSIMP_strincmp(pPtr, ResolutionOption.c_str(), static_cast<unsigned int>(ResolutionOption.size())) || !ASSIMP_strincmp(pPtr, BumpOption.c_str(), static_cast<unsigned int>(BumpOption.size())) || !ASSIMP_strincmp(pPtr, ChannelOption.c_str(), static_cast<unsigned int>(ChannelOption.size()))) {
+        } else if (!ASSIMP_strincmp(pPtr, BumpOption, static_cast<unsigned int>(strlen(BumpOption)))) {
+            DataArrayIt it = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
+            getFloat(it, mDataItEnd, mModel->mCurrentMaterial->bump_multiplier);
             skipToken = 2;
-        } else if (!ASSIMP_strincmp(pPtr, ModifyMapOption.c_str(), static_cast<unsigned int>(ModifyMapOption.size()))) {
+        } else if (!ASSIMP_strincmp(pPtr, BlendUOption, static_cast<unsigned int>(strlen(BlendUOption))) ||
+                !ASSIMP_strincmp(pPtr, BlendVOption, static_cast<unsigned int>(strlen(BlendVOption))) ||
+                !ASSIMP_strincmp(pPtr, BoostOption, static_cast<unsigned int>(strlen(BoostOption))) ||
+                !ASSIMP_strincmp(pPtr, ResolutionOption, static_cast<unsigned int>(strlen(ResolutionOption))) ||
+                !ASSIMP_strincmp(pPtr, ChannelOption, static_cast<unsigned int>(strlen(ChannelOption)))) {
+            skipToken = 2;
+        } else if (!ASSIMP_strincmp(pPtr, ModifyMapOption, static_cast<unsigned int>(strlen(ModifyMapOption)))) {
             skipToken = 3;
-        } else if (!ASSIMP_strincmp(pPtr, OffsetOption.c_str(), static_cast<unsigned int>(OffsetOption.size())) || !ASSIMP_strincmp(pPtr, ScaleOption.c_str(), static_cast<unsigned int>(ScaleOption.size())) || !ASSIMP_strincmp(pPtr, TurbulenceOption.c_str(), static_cast<unsigned int>(TurbulenceOption.size()))) {
+        } else if (!ASSIMP_strincmp(pPtr, OffsetOption, static_cast<unsigned int>(strlen(OffsetOption))) ||
+                !ASSIMP_strincmp(pPtr, ScaleOption, static_cast<unsigned int>(strlen(ScaleOption))) ||
+                !ASSIMP_strincmp(pPtr, TurbulenceOption, static_cast<unsigned int>(strlen(TurbulenceOption)))) {
             skipToken = 4;
         }
 
         for (int i = 0; i < skipToken; ++i) {
-            m_DataIt = getNextToken<DataArrayIt>(m_DataIt, m_DataItEnd);
+            mDataIt = getNextToken<DataArrayIt>(mDataIt, mDataItEnd);
         }
     }
 }
-
-// -------------------------------------------------------------------
 
 } // Namespace Assimp
 

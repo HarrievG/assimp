@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -55,11 +54,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdlib>
 #include <locale>
 #include <sstream>
+#include <iomanip>
 
-#ifdef _MSC_VER
-#define AI_SIZEFMT "%Iu"
+#if defined(_MSC_VER) && !defined(__clang__)
+#  define AI_SIZEFMT "%Iu"
 #else
-#define AI_SIZEFMT "%zu"
+#  define AI_SIZEFMT "%zu"
 #endif
 
 // ---------------------------------------------------------------------------------
@@ -99,9 +99,9 @@ inline int ai_snprintf(char *outBuf, size_t size, const char *format, ...) {
 }
 
 #elif defined(__MINGW32__)
-#define ai_snprintf __mingw_snprintf
+#  define ai_snprintf __mingw_snprintf
 #else
-#define ai_snprintf snprintf
+#  define ai_snprintf snprintf
 #endif
 
 // ---------------------------------------------------------------------------------
@@ -157,7 +157,7 @@ AI_FORCE_INLINE std::string ai_decimal_to_hexa(T toConvert) {
     ss >> result;
 
     for (size_t i = 0; i < result.size(); ++i) {
-        result[i] = (char)toupper(result[i]);
+        result[i] = (char)toupper((unsigned char)result[i]);
     }
 
     return result;
@@ -177,7 +177,7 @@ AI_FORCE_INLINE std::string ai_rgba2hex(int r, int g, int b, int a, bool with_he
     if (with_head) {
         ss << "#";
     }
-    ss << std::hex << (r << 24 | g << 16 | b << 8 | a);
+    ss << std::hex << std::setfill('0') << std::setw(8) << (r << 24 | g << 16 | b << 8 | a);
 
     return ss.str();
 }
@@ -185,6 +185,7 @@ AI_FORCE_INLINE std::string ai_rgba2hex(int r, int g, int b, int a, bool with_he
 // ---------------------------------------------------------------------------------
 /// @brief   Performs a trim from start (in place)
 /// @param  s   string to trim.
+// ---------------------------------------------------------------------------------
 AI_FORCE_INLINE void ai_trim_left(std::string &s) {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
         return !std::isspace(ch);
@@ -194,7 +195,6 @@ AI_FORCE_INLINE void ai_trim_left(std::string &s) {
 // ---------------------------------------------------------------------------------
 /// @brief  Performs a trim from end (in place).
 /// @param  s   string to trim.
-// ---------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------
 AI_FORCE_INLINE void ai_trim_right(std::string &s) {
     s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
@@ -215,6 +215,10 @@ AI_FORCE_INLINE std::string ai_trim(std::string &s) {
 }
 
 // ---------------------------------------------------------------------------------
+/// @brief Performs a to lower operation onto on single character.
+/// @param in  The character
+/// @return the character as lower-case.
+// ---------------------------------------------------------------------------------
 template <class char_t>
 AI_FORCE_INLINE char_t ai_tolower(char_t in) {
     return (in >= (char_t)'A' && in <= (char_t)'Z') ? (char_t)(in + 0x20) : in;
@@ -234,6 +238,10 @@ AI_FORCE_INLINE std::string ai_tolower(const std::string &in) {
 }
 
 // ---------------------------------------------------------------------------------
+/// @brief Performs a to upper operation onto on single character.
+/// @param in  The character
+/// @return the character as upper-case.
+// ---------------------------------------------------------------------------------
 template <class char_t>
 AI_FORCE_INLINE char_t ai_toupper(char_t in) {
     return (in >= (char_t)'a' && in <= (char_t)'z') ? (char_t)(in - 0x20) : in;
@@ -243,10 +251,39 @@ AI_FORCE_INLINE char_t ai_toupper(char_t in) {
 /// @brief  Performs a ToLower-operation and return the upper-case string.
 /// @param  in  The incoming string.
 /// @return The string as uppercase.
+// ---------------------------------------------------------------------------------
 AI_FORCE_INLINE std::string ai_str_toupper(const std::string &in) {
     std::string out(in);
     std::transform(out.begin(), out.end(), out.begin(), [](char c) { return ai_toupper(c); });
     return out;
 }
 
-#endif
+// ---------------------------------------------------------------------------------
+/// @brief  Make a string printable by replacing all non-printable characters with
+///         the specified placeholder character.
+/// @param  in  The incoming string.
+/// @param  placeholder  Placeholder character, default is a question mark.
+/// @return The string, with all non-printable characters replaced.
+// ---------------------------------------------------------------------------------
+AI_FORCE_INLINE std::string ai_str_toprintable(const std::string &in, char placeholder = '?') {
+    std::string out(in);
+    std::transform(out.begin(), out.end(), out.begin(), [placeholder] (unsigned char c) {
+        return isprint(c) ? (char)c :  placeholder;
+    });
+    return out;
+}
+
+// ---------------------------------------------------------------------------------
+/// @brief  Make a string printable by replacing all non-printable characters with
+///         the specified placeholder character.
+/// @param  in  The incoming string.
+/// @param  len The length of the incoming string.
+/// @param  placeholder  Placeholder character, default is a question mark.
+/// @return The string, with all non-printable characters replaced. Will return an
+///         empty string if in is null or len is <= 0.
+// ---------------------------------------------------------------------------------
+AI_FORCE_INLINE std::string ai_str_toprintable(const char *in, int len, char placeholder = '?') {
+    return (in && len > 0) ? ai_str_toprintable(std::string(in, len), placeholder) : std::string();
+}
+
+#endif // INCLUDED_AI_STRINGUTILS_H

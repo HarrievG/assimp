@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -48,7 +48,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/scene.h>
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/Exporter.hpp>
-#include <assimp/IOStream.hpp>
 #include <assimp/IOSystem.hpp>
 
 #include "3MFXmlTags.h"
@@ -83,7 +82,7 @@ void ExportScene3MF(const char *pFile, IOSystem *pIOSystem, const aiScene *pScen
 namespace D3MF {
 
 D3MFExporter::D3MFExporter(const char *pFile, const aiScene *pScene) :
-        mArchiveName(pFile), m_zipArchive(nullptr), mScene(pScene), mModelOutput(), mRelOutput(), mContentOutput(), mBuildItems(), mRelations() {
+        mArchiveName(pFile), mScene(pScene) {
     // empty
 }
 
@@ -94,7 +93,7 @@ D3MFExporter::~D3MFExporter() {
     mRelations.clear();
 }
 
-bool D3MFExporter::validate() {
+bool D3MFExporter::validate() const {
     if (mArchiveName.empty()) {
         return false;
     }
@@ -109,8 +108,8 @@ bool D3MFExporter::validate() {
 bool D3MFExporter::exportArchive(const char *file) {
     bool ok(true);
 
-    m_zipArchive = zip_open(file, ZIP_DEFAULT_COMPRESSION_LEVEL, 'w');
-    if (nullptr == m_zipArchive) {
+    mZipArchive = zip_open(file, ZIP_DEFAULT_COMPRESSION_LEVEL, 'w');
+    if (nullptr == mZipArchive) {
         return false;
     }
 
@@ -118,8 +117,8 @@ bool D3MFExporter::exportArchive(const char *file) {
     ok |= export3DModel();
     ok |= exportRelations();
 
-    zip_close(m_zipArchive);
-    m_zipArchive = nullptr;
+    zip_close(mZipArchive);
+    mZipArchive = nullptr;
 
     return ok;
 }
@@ -249,10 +248,10 @@ void D3MFExporter::writeBaseMaterials() {
             if (color.r <= 1 && color.g <= 1 && color.b <= 1 && color.a <= 1) {
 
                 hexDiffuseColor = ai_rgba2hex(
-                        (int)((ai_real)color.r) * 255,
-                        (int)((ai_real)color.g) * 255,
-                        (int)((ai_real)color.b) * 255,
-                        (int)((ai_real)color.a) * 255,
+                        (int)(((ai_real)color.r) * 255),
+                        (int)(((ai_real)color.g) * 255),
+                        (int)(((ai_real)color.b) * 255),
+                        (int)(((ai_real)color.a) * 255),
                         true);
 
             } else {
@@ -307,18 +306,26 @@ void D3MFExporter::writeMesh(aiMesh *mesh) {
         return;
     }
 
-    mModelOutput << "<" << XmlTag::mesh << ">" << std::endl;
-    mModelOutput << "<" << XmlTag::vertices << ">" << std::endl;
+    mModelOutput << "<"
+                 << XmlTag::mesh
+                 << ">" << "\n";
+    mModelOutput << "<"
+                 << XmlTag::vertices
+                 << ">" << "\n";
     for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
         writeVertex(mesh->mVertices[i]);
     }
-    mModelOutput << "</" << XmlTag::vertices << ">" << std::endl;
+    mModelOutput << "</"
+                 << XmlTag::vertices << ">"
+                 << "\n";
 
     const unsigned int matIdx(mesh->mMaterialIndex);
 
     writeFaces(mesh, matIdx);
 
-    mModelOutput << "</" << XmlTag::mesh << ">" << std::endl;
+    mModelOutput << "</"
+                 << XmlTag::mesh << ">"
+                 << "\n";
 }
 
 void D3MFExporter::writeVertex(const aiVector3D &pos) {
@@ -334,27 +341,39 @@ void D3MFExporter::writeFaces(aiMesh *mesh, unsigned int matIdx) {
     if (!mesh->HasFaces()) {
         return;
     }
-    mModelOutput << "<" << XmlTag::triangles << ">" << std::endl;
+    mModelOutput << "<"
+                 << XmlTag::triangles << ">"
+                 << "\n";
     for (unsigned int i = 0; i < mesh->mNumFaces; ++i) {
         aiFace &currentFace = mesh->mFaces[i];
+        // A 3MF triangle has exactly three vertices; points and lines have no
+        // representation in it, and reading three indices from them overruns.
+        if (currentFace.mNumIndices != 3) {
+            continue;
+        }
         mModelOutput << "<" << XmlTag::triangle << " v1=\"" << currentFace.mIndices[0] << "\" v2=\""
                      << currentFace.mIndices[1] << "\" v3=\"" << currentFace.mIndices[2]
                      << "\" pid=\"1\" p1=\"" + ai_to_string(matIdx) + "\" />";
-        mModelOutput << std::endl;
+        mModelOutput << "\n";
     }
-    mModelOutput << "</" << XmlTag::triangles << ">";
-    mModelOutput << std::endl;
+    mModelOutput << "</"
+                 << XmlTag::triangles
+                 << ">";
+    mModelOutput << "\n";
 }
 
 void D3MFExporter::writeBuild() {
-    mModelOutput << "<" << XmlTag::build << ">" << std::endl;
+    mModelOutput << "<"
+                 << XmlTag::build
+                 << ">"
+                 << "\n";
 
     for (size_t i = 0; i < mBuildItems.size(); ++i) {
         mModelOutput << "<" << XmlTag::item << " objectid=\"" << i + 2 << "\"/>";
-        mModelOutput << std::endl;
+        mModelOutput << "\n";
     }
     mModelOutput << "</" << XmlTag::build << ">";
-    mModelOutput << std::endl;
+    mModelOutput << "\n";
 }
 
 void D3MFExporter::zipContentType(const std::string &filename) {
@@ -372,13 +391,13 @@ void D3MFExporter::zipRelInfo(const std::string &folder, const std::string &relN
 }
 
 void D3MFExporter::addFileInZip(const std::string& entry, const std::string& content) {
-    if (nullptr == m_zipArchive) {
+    if (nullptr == mZipArchive) {
         throw DeadlyExportError("3MF-Export: Zip archive not valid, nullptr.");
     }
 
-    zip_entry_open(m_zipArchive, entry.c_str());
-    zip_entry_write(m_zipArchive, content.c_str(), content.size());
-    zip_entry_close(m_zipArchive);
+    zip_entry_open(mZipArchive, entry.c_str());
+    zip_entry_write(mZipArchive, content.c_str(), content.size());
+    zip_entry_close(mZipArchive);
 }
 
 } // Namespace D3MF

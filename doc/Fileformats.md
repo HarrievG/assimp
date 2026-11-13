@@ -12,9 +12,8 @@ __Importers__:
 - ASE
 - ASK
 - B3D
-- [BLEND](https://en.wikipedia.org/wiki/.blend_(file_format))
 - [BVH](https://en.wikipedia.org/wiki/Biovision_Hierarchy)
-- CMS
+- CSM
 - COB
 - [DAE/Collada](https://en.wikipedia.org/wiki/COLLADA)
 - [DXF](https://en.wikipedia.org/wiki/AutoCAD_DXF)
@@ -29,11 +28,14 @@ __Importers__:
   + KHR_texture_transform ( 5.1 under test )
 - HMB
 - IFC-STEP
+- IQM
 - IRR / IRRMESH
 - [LWO](https://en.wikipedia.org/wiki/LightWave_3D)
 - LWS
 - LXO
 - [M3D](https://bztsrc.gitlab.io/model3d)
+   - **REQUIRES OPT-IN:** enable cmake options `ASSIMP_BUILD_M3D_IMPORTER`/`ASSIMP_BUILD_M3D_EXPORTER`
+      - NOTE: author of `M3D` format abandoned assimp support; implementation is incomplete and buggy.
 - MD2
 - MD3
 - MD5
@@ -60,11 +62,19 @@ __Importers__:
 - [STL](https://en.wikipedia.org/wiki/STL_(file_format))
 - TER
 - UC
+- [USD](https://en.wikipedia.org/wiki/Universal_Scene_Description)
+   - **REQUIRES OPT-IN:** enable cmake option `ASSIMP_BUILD_USD_IMPORTER`
+   - To use latest v1.0.0 USD release also enable cmake option `ASSIMP_USD_BETA`
+- VRML/WRL
+   - **REQUIRES OPT-IN:** enable cmake option `ASSIMP_BUILD_VRML_IMPORTER`
 - VTA
 - X
 - [X3D](https://en.wikipedia.org/wiki/X3D)
 - XGL
 - ZGL
+
+Note: support for [BLEND](https://en.wikipedia.org/wiki/.blend_(file_format)) is deprecated.
+It is too time-consuming to maintain an undocumented format which contains so much more than we need.
 
 Additionally, some formats are supported by dependency on non-free code or external SDKs (not built by default):
 
@@ -81,6 +91,7 @@ __Exporters__:
 - JSON (for WebGl, via https://github.com/acgessler/assimp2json)
 - ASSBIN
 - STEP
+- [PBRTv4](https://github.com/mmp/pbrt-v4)
 - glTF 1.0 (partial)
 - glTF 2.0 (partial)
 - 3MF ( experimental )

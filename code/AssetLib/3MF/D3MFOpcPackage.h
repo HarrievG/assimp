@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -39,15 +39,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ----------------------------------------------------------------------
 */
 
-#ifndef D3MFOPCPACKAGE_H
-#define D3MFOPCPACKAGE_H
+#ifndef D3MFOPCPACKAGE_H_INC
+#define D3MFOPCPACKAGE_H_INC
 
-#include <memory>
-#include <string>
 #include <assimp/IOSystem.hpp>
+#include <string>
+
+struct aiTexture;
 
 namespace Assimp {
-    class ZipArchiveIOSystem;
+
+class ZipArchiveIOSystem;
 
 namespace D3MF {
 
@@ -59,20 +61,48 @@ struct OpcPackageRelationship {
 
 class D3MFOpcPackage {
 public:
+    /// @brief Constructor.
     D3MFOpcPackage( IOSystem* pIOHandler, const std::string& file );
+
+    /// @brief Destructor.
     ~D3MFOpcPackage();
+
+    /// @brief Will return the root stream
+    /// @return The root stream
     IOStream* RootStream() const;
+
+    /// @brief Absolute path of the root model part inside the container (production extension).
+    const std::string &RootPath() const;
+
+    /// @brief Open an arbitrary model part referenced via a production-extension path attribute.
+    ///        The returned stream must be released with CloseStream(). Returns nullptr if missing.
+    IOStream *OpenPart(const std::string &path);
+
+    /// @brief Close a stream opened with OpenPart().
+    /// @param stream The stream to close
+    void CloseStream(IOStream *stream);
+
+    /// @brief Strip leading slashes so an OPC absolute path matches the zip entry name.
+    static std::string NormalizePath(const std::string &path);
+
+    /// @brief Validate the package.
     bool validate();
+
+    /// @brief Will return all embedded texctures.
+    const std::vector<aiTexture*> &GetEmbeddedTextures() const;
 
 protected:
     std::string ReadPackageRootRelationship(IOStream* stream);
+    void LoadEmbeddedTextures(IOStream *fileStream, const std::string &filename);
 
 private:
-    IOStream* mRootStream;
-    std::unique_ptr<ZipArchiveIOSystem> mZipArchive;
+    IOStream* mRootStream{nullptr};
+    std::string mRootPath{};
+    ZipArchiveIOSystem *mZipArchive{nullptr};
+    std::vector<aiTexture *> mEmbeddedTextures{};
 };
 
-} // Namespace D3MF
-} // Namespace Assimp
+} // namespace D3MF
+} // namespace Assimp
 
-#endif // D3MFOPCPACKAGE_H
+#endif // D3MFOPCPACKAGE_H_INC

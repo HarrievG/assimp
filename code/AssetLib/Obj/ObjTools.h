@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2020, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -47,65 +47,87 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <assimp/ParsingUtils.h>
 #include <assimp/fast_atof.h>
+#include <string_view>
 #include <vector>
 
 namespace Assimp {
 
-/** @brief  Returns true, if the last entry of the buffer is reached.
- *  @param  it  Iterator of current position.
- *  @param  end Iterator with end of buffer.
+/**
+ *  @brief  Returns true, if the last entry of the buffer is reached.
+ *  @param[in] it   Iterator of current position.
+ *  @param[in] end  Iterator with end of buffer.
  *  @return true, if the end of the buffer is reached.
  */
 template <class char_t>
 inline bool isEndOfBuffer(char_t it, char_t end) {
     if (it == end) {
         return true;
-    } else {
-        --end;
     }
+    --end;
+
     return (it == end);
 }
 
-/** @brief  Returns next word separated by a space
- *  @param  pBuffer Pointer to data buffer
- *  @param  pEnd    Pointer to end of buffer
+/**
+ *  @brief  Returns next word separated by a space
+ *  @param[in] pBuffer  Pointer to data buffer
+ *  @param[in] pEnd     Pointer to end of buffer
  *  @return Pointer to next space
  */
 template <class Char_T>
 inline Char_T getNextWord(Char_T pBuffer, Char_T pEnd) {
     while (!isEndOfBuffer(pBuffer, pEnd)) {
         if (!IsSpaceOrNewLine(*pBuffer) || IsLineEnd(*pBuffer)) {
-            //if ( *pBuffer != '\\' )
             break;
         }
-        pBuffer++;
+        ++pBuffer;
+    }
+
+    return pBuffer;
+}
+
+/**
+ *  @brief  Returns next space
+ *  @param[in] pBuffer  Pointer to data buffer
+ *  @param[in] pEnd     Pointer to end of buffer
+ *  @return Pointer to next space
+ */
+template <class Char_T>
+inline Char_T getNextDelimiter(Char_T pBuffer, Char_T pEnd) {
+    while (!isEndOfBuffer(pBuffer, pEnd)) {
+        if (IsSpaceOrNewLine(*pBuffer)) {
+            break;
+        }
+        ++pBuffer;
     }
     return pBuffer;
 }
 
-/** @brief  Returns pointer a next token
- *  @param  pBuffer Pointer to data buffer
- *  @param  pEnd    Pointer to end of buffer
+/**
+ *  @brief  Returns pointer a next token
+ *  @param[in] pBuffer  Pointer to data buffer
+ *  @param[in] pEnd     Pointer to end of buffer
  *  @return Pointer to next token
  */
 template <class Char_T>
 inline Char_T getNextToken(Char_T pBuffer, Char_T pEnd) {
-    while (!isEndOfBuffer(pBuffer, pEnd)) {
-        if (IsSpaceOrNewLine(*pBuffer))
-            break;
-        pBuffer++;
-    }
+    pBuffer = getNextDelimiter(pBuffer, pEnd);
     return getNextWord(pBuffer, pEnd);
 }
 
-/** @brief  Skips a line
- *  @param  it      Iterator set to current position
- *  @param  end     Iterator set to end of scratch buffer for readout
- *  @param  uiLine  Current line number in format
+/**
+ *  @brief  Skips a line
+ *  @param[in]  it      Iterator set to current position
+ *  @param[in]  end     Iterator set to end of scratch buffer for readout
+ *  @param[out] uiLine  Current line number in format
  *  @return Current-iterator with new position
  */
 template <class char_t>
 inline char_t skipLine(char_t it, char_t end, unsigned int &uiLine) {
+    if (it >= end) {
+        return it;
+    }
+
     while (!isEndOfBuffer(it, end) && !IsLineEnd(*it)) {
         ++it;
     }
@@ -122,11 +144,12 @@ inline char_t skipLine(char_t it, char_t end, unsigned int &uiLine) {
     return it;
 }
 
-/** @brief  Get a name from the current line. Preserve space in the middle,
- *    but trim it at the end.
- *  @param  it      set to current position
- *  @param  end     set to end of scratch buffer for readout
- *  @param  name    Separated name
+/**
+ *  @brief  Get a name from the current line. Preserve space in the middle,
+ *          but trim it at the end.
+ *  @param[in]  it      set to current position
+ *  @param[in]  end     set to end of scratch buffer for readout
+ *  @param[out] name    Separated name
  *  @return Current-iterator with new position
  */
 template <class char_t>
@@ -150,15 +173,16 @@ inline char_t getName(char_t it, char_t end, std::string &name) {
         ++it;
     }
     std::string strName(pStart, &(*it));
-    if (strName.empty())
-        return it;
-    else
+    if (!strName.empty()) {
         name = strName;
+    }
+
 
     return it;
 }
 
-/** @brief  Get a name from the current line. Do not preserve space
+/**
+ *  @brief  Get a name from the current line. Do not preserve space
  *    in the middle, but trim it at the end.
  *  @param  it      set to current position
  *  @param  end     set to end of scratch buffer for readout
@@ -188,19 +212,19 @@ inline char_t getNameNoSpace(char_t it, char_t end, std::string &name) {
         ++it;
     }
     std::string strName(pStart, &(*it));
-    if (strName.empty())
-        return it;
-    else
+    if (!strName.empty()) {
         name = strName;
+    }
 
     return it;
 }
 
-/** @brief  Get next word from given line
- *  @param  it      set to current position
- *  @param  end     set to end of scratch buffer for readout
- *  @param  pBuffer Buffer for next word
- *  @param  length  Buffer length
+/**
+ *  @brief  Get next word from given line
+ *  @param[in] it      set to current position
+ *  @param[in] end     set to end of scratch buffer for readout
+ *  @param[in] pBuffer Buffer for next word
+ *  @param[in] length  Buffer length
  *  @return Current-iterator with new position
  */
 template <class char_t>
@@ -209,46 +233,44 @@ inline char_t CopyNextWord(char_t it, char_t end, char *pBuffer, size_t length) 
     it = getNextWord<char_t>(it, end);
     while (!IsSpaceOrNewLine(*it) && !isEndOfBuffer(it, end)) {
         pBuffer[index] = *it;
-        index++;
-        if (index == length - 1)
+        ++index;
+        if (index == length - 1) {
             break;
+        }
         ++it;
     }
     pBuffer[index] = '\0';
     return it;
 }
 
-/** @brief  Get next float from given line
- *  @param  it      set to current position
- *  @param  end     set to end of scratch buffer for readout
- *  @param  value   Separated float value.
+/**
+ *  @brief  Get next float from given line
+ *  @param[in]  it      set to current position
+ *  @param[in]  end     set to end of scratch buffer for readout
+ *  @param[out] value   Separated float value.
  *  @return Current-iterator with new position
  */
 template <class char_t>
 inline char_t getFloat(char_t it, char_t end, ai_real &value) {
     static const size_t BUFFERSIZE = 1024;
-    char buffer[BUFFERSIZE];
+    char buffer[BUFFERSIZE] = {};
     it = CopyNextWord<char_t>(it, end, buffer, BUFFERSIZE);
     value = (ai_real)fast_atof(buffer);
 
     return it;
 }
 
-
-template <class string_type>
-string_type trim_whitespaces(string_type str) {
-    while (!str.empty() && IsSpace(str[0]))
-        str.erase(0);
-    while (!str.empty() && IsSpace(str[str.length() - 1]))
-        str.erase(str.length() - 1);
-    return str;
-}
-
+/**
+ *  @brief  Checks for a line-end.
+ *  @param[in] it   Current iterator in string.
+ *  @param[in] end  End of the string.
+ *  @return The trimmed string.
+ */
 template <class T>
 bool hasLineEnd(T it, T end) {
-    bool hasLineEnd(false);
+    bool hasLineEnd = false;
     while (!isEndOfBuffer(it, end)) {
-        it++;
+        ++it;
         if (IsLineEnd(it)) {
             hasLineEnd = true;
             break;
@@ -256,6 +278,139 @@ bool hasLineEnd(T it, T end) {
     }
 
     return hasLineEnd;
+}
+
+// ---------------------------------------------------------------------------
+// String view utilities for zero-copy parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Trim whitespace from both ends of a string_view
+ * @param[in] sv The string_view to trim
+ * @return Trimmed string_view
+ */
+static inline std::string_view trimStringView(std::string_view sv) {
+    const std::string_view whitespace = " \t\r\n";
+    size_t start = sv.find_first_not_of(whitespace);
+    if (start == std::string_view::npos) {
+        return std::string_view();
+    }
+    size_t end = sv.find_last_not_of(whitespace);
+    return sv.substr(start, end - start + 1);
+}
+
+/**
+ * @brief Get a name from the current line as string_view. Preserve space in the middle,
+ *        but trim it at the end.
+ * @param[in]  it      set to current position
+ * @param[in]  end     set to end of scratch buffer for readout
+ * @return string_view with the name
+ */
+template <class char_t>
+inline std::string_view getNameAsStringView(char_t it, char_t end) {
+    if (isEndOfBuffer(it, end)) {
+        return std::string_view();
+    }
+
+    const char* pStart = &(*it);
+    while (!isEndOfBuffer(it, end) && !IsLineEnd(*it)) {
+        ++it;
+    }
+
+    while (it != end && IsSpace(*it)) {
+        --it;
+    }
+    // Adjust if we went past start
+    while (&(*it) < pStart) {
+        ++it;
+    }
+    return std::string_view(pStart, static_cast<size_t>(&(*it) - pStart));
+}
+
+/**
+ * @brief  Get a name from the current line as string_view. Do not preserve space
+ *         in the middle, but trim it at the end.
+ * @param  it      set to current position
+ * @param  end     set to end of scratch buffer for readout
+ * @return string_view with the name
+ */
+template <class char_t>
+inline std::string_view getNameNoSpaceAsStringView(char_t it, char_t end) {
+    if (isEndOfBuffer(it, end)) {
+        return std::string_view();
+    }
+
+    const char* pStart = &(*it);
+    while (!isEndOfBuffer(it, end) && !IsLineEnd(*it) && !IsSpaceOrNewLine(*it)) {
+        ++it;
+    }
+
+    while (isEndOfBuffer(it, end) || IsLineEnd(*it) || IsSpaceOrNewLine(*it)) {
+        if (it != end) --it;
+    }
+    ++it;
+
+    // Adjust if we went past start
+    while (&(*it) < pStart) {
+        ++it;
+    }
+    return std::string_view(pStart, static_cast<size_t>(&(*it) - pStart));
+}
+
+/**
+ * @brief Get next word from given line as string_view
+ * @param[in] it      set to current position
+ * @param[in] end     set to end of scratch buffer for readout
+ * @return string_view with the next word
+ */
+template <class char_t>
+inline std::string_view getNextWordAsStringView(char_t it, char_t end) {
+    it = getNextWord<char_t>(it, end);
+    if (isEndOfBuffer(it, end)) {
+        return std::string_view();
+    }
+    const char* pStart = &(*it);
+    while (!isEndOfBuffer(it, end) && !IsSpaceOrNewLine(*it) && !IsLineEnd(*it)) {
+        ++it;
+    }
+    return std::string_view(pStart, static_cast<size_t>(&(*it) - pStart));
+}
+
+/**
+ * @brief Get next token from given line as string_view
+ * @param[in] it      set to current position
+ * @param[in] end     set to end of scratch buffer for readout
+ * @return string_view with the next token
+ */
+template <class char_t>
+inline std::string_view getNextTokenAsStringView(char_t it, char_t end) {
+    it = getNextToken<char_t>(it, end);
+    if (isEndOfBuffer(it, end)) {
+        return std::string_view();
+    }
+    const char* pStart = &(*it);
+    while (!isEndOfBuffer(it, end) && !IsSpaceOrNewLine(*it) && !IsLineEnd(*it)) {
+        ++it;
+    }
+    return std::string_view(pStart, static_cast<size_t>(&(*it) - pStart));
+}
+
+/**
+ * @brief Get the rest of the line as string_view
+ * @param[in] it      set to current position
+ * @param[in] end     set to end of scratch buffer for readout
+ * @return string_view with the rest of the line
+ */
+template <class char_t>
+inline std::string_view getRestOfLineAsStringView(char_t it, char_t end) {
+    if (isEndOfBuffer(it, end)) {
+        return std::string_view();
+    }
+    const char* pStart = &(*it);
+    while (!isEndOfBuffer(it, end) && !IsLineEnd(*it)) {
+        ++it;
+    }
+    return std::string_view(pStart, static_cast<size_t>(&(*it) - pStart));
 }
 
 } // Namespace Assimp

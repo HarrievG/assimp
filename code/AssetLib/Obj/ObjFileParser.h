@@ -41,50 +41,48 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef OBJ_FILEPARSER_H_INC
 #define OBJ_FILEPARSER_H_INC
 
+#include "ObjFileData.h"
+
 #include <assimp/IOStreamBuffer.h>
+#include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/vector2.h>
 #include <assimp/vector3.h>
-#include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Assimp {
 
-namespace ObjFile {
-struct Model;
-struct Object;
-struct Material;
-struct Point3;
-struct Point2;
-} // namespace ObjFile
-
+// Forward declarations
 class ObjFileImporter;
 class IOSystem;
 class ProgressHandler;
 
-/// \class  ObjFileParser
-/// \brief  Parser for a obj waveform file
+// ------------------------------------------------------------------------------------------------
+/// @class  ObjFileParser
+/// @brief  Parser for a obj waveform file
+// ------------------------------------------------------------------------------------------------
 class ASSIMP_API ObjFileParser {
 public:
-    static const size_t Buffersize = 4096;
-    typedef std::vector<char> DataArray;
-    typedef std::vector<char>::iterator DataArrayIt;
-    typedef std::vector<char>::const_iterator ConstDataArrayIt;
+    static constexpr size_t Buffersize = 4096;
+    using DataArray = std::vector<char>;
+    using DataArrayIt = std::vector<char>::iterator;
+    using ConstDataArrayIt = std::vector<char>::const_iterator;
 
-public:
     /// @brief  The default constructor.
     ObjFileParser();
     /// @brief  Constructor with data array.
     ObjFileParser(IOStreamBuffer<char> &streamBuffer, const std::string &modelName, IOSystem *io, ProgressHandler *progress, const std::string &originalObjFileName);
     /// @brief  Destructor
-    ~ObjFileParser();
+    ~ObjFileParser() = default;
     /// @brief  If you want to load in-core data.
     void setBuffer(std::vector<char> &buffer);
     /// @brief  Model getter.
     ObjFile::Model *GetModel() const;
 
+    // Copying not allowed
     ObjFileParser(const ObjFileParser&) = delete;
     ObjFileParser &operator=(const ObjFileParser& ) = delete;
 
@@ -92,9 +90,7 @@ protected:
     /// Parse the loaded file
     void parseFile(IOStreamBuffer<char> &streamBuffer);
     /// Method to copy the new delimited word in the current line.
-    void copyNextWord(char *pBuffer, size_t length);
-    /// Method to copy the new line.
-    //    void copyNextLine(char *pBuffer, size_t length);
+    void copyNextWord();
     /// Get the number of components in a line.
     size_t getNumComponentsInDataDefinition();
     /// Stores the vector
@@ -111,8 +107,8 @@ protected:
     void getFace(aiPrimitiveType type);
     /// Reads the material description.
     void getMaterialDesc();
-    /// Gets a comment.
-    void getComment();
+    /// Skip a comment.
+    void skipComment();
     /// Gets a a material library.
     void getMaterialLib();
     /// Creates a new material.
@@ -120,44 +116,47 @@ protected:
     /// Gets the group name from file.
     void getGroupName();
     /// Gets the group number from file.
-    void getGroupNumber();
+    void skipGroupNumber();
     /// Gets the group number and resolution from file.
-    void getGroupNumberAndResolution();
+    void skipGroupNumberAndResolution();
+    /// Reselect an existing group (Wavefront `group` keyword) for late material assignment.
+    void reselectGroup();
     /// Returns the index of the material. Is -1 if not material was found.
-    int getMaterialIndex(const std::string &strMaterialName);
+    int getMaterialIndex(std::string_view strMaterialName);
     /// Parse object name
     void getObjectName();
     /// Creates a new object.
-    void createObject(const std::string &strObjectName);
+    void createObject(std::string_view strObjectName);
     /// Creates a new mesh.
-    void createMesh(const std::string &meshName);
+    void createMesh(std::string_view meshName);
     /// Returns true, if a new mesh instance must be created.
-    bool needsNewMesh(const std::string &rMaterialName);
+    bool needsNewMesh(std::string_view rMaterialName);
     /// Error report in token
     void reportErrorTokenInFace();
+    /// Parse next token from current position, sets mCurrentToken, mTokenStart, mTokenEnd
+    void parseNextToken();
+    /// Parse float directly from current token position (uses mTokenStart)
+    ai_real parseFloatDirect();
+    /// Parse int directly from current token position (uses mTokenStart)
+    int parseIntDirect();
 
-private:
-    // Copy and assignment constructor should be private
-    // because the class contains pointer to allocated memory
-
-    /// Default material name
-    static const std::string DEFAULT_MATERIAL;
-    //! Iterator to current position in buffer
-    DataArrayIt m_DataIt;
-    //! Iterator to end position of buffer
-    DataArrayIt m_DataItEnd;
-    //! Pointer to model instance
-    std::unique_ptr<ObjFile::Model> m_pModel;
-    //! Current line (for debugging)
-    unsigned int m_uiLine;
-    //! Helper buffer
-    char m_buffer[Buffersize];
-    /// Pointer to IO system instance.
-    IOSystem *m_pIO;
-    //! Pointer to progress handler
-    ProgressHandler *m_progress;
-    /// Path to the current model, name of the obj file where the buffer comes from
-    const std::string m_originalObjFileName;
+protected:
+    static constexpr char DEFAULT_MATERIAL[] = AI_DEFAULT_MATERIAL_NAME;    ///< Default material name
+    DataArrayIt mDataIt{};                                                  ///< Iterator to current position in buffer
+    DataArrayIt mDataItEnd{};                                               ///< Iterator to end position of buffer
+    std::unique_ptr<ObjFile::Model> mModel{};                               ///< Pointer to model instance
+    bool mReselectMode{ false };                                            ///< When true, trailing `group`/`usemtl` assigns materials to already-built meshes (Viewpoint OBJs).
+    unsigned int mLine{ 0 };                                                ///< Current line (for debugging)
+    std::string mBuffer;                                                    ///< Helper buffer (safe) - kept for backward compatibility
+    const char *mEnd{ nullptr };                                            ///< End of buffer
+    IOSystem *mIO{ nullptr };                                               ///< Pointer to the IO-system instance.
+    ProgressHandler *mProgress{ nullptr };                                  ///< Pointer to progress handler
+    const std::string mOriginalObjFileName{};                               ///< Path to the current model, name of the obj file where the buffer comes from
+    // --- Zero-copy parsing members ---
+    /// Current token as string_view (avoids string allocations)
+    std::string_view mCurrentToken;
+    const char* mTokenStart{ nullptr };                                     ///< Start pointer of the current token
+    const char* mTokenEnd{ nullptr };                                       ///< End pointer of the current token
 };
 
 } // Namespace Assimp

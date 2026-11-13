@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -79,7 +79,7 @@ TEST_F(utColladaExport, testExportCamera) {
 
     EXPECT_EQ(AI_SUCCESS, ex->Export(pTest, "collada", file));
     const unsigned int origNumCams(pTest->mNumCameras);
-    //std::vector<float> origFOV;
+
     std::unique_ptr<float[]> origFOV(new float[origNumCams]);
     std::unique_ptr<float[]> orifClipPlaneNear(new float[origNumCams]);
     std::unique_ptr<float[]> orifClipPlaneFar(new float[origNumCams]);
@@ -114,6 +114,9 @@ TEST_F(utColladaExport, testExportCamera) {
         EXPECT_FLOAT_EQ(pos[i].y, read->mPosition.y);
         EXPECT_FLOAT_EQ(pos[i].z, read->mPosition.z);
     }
+
+    // Cleanup, delete the exported file
+    EXPECT_EQ(0, std::remove(file));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -124,13 +127,21 @@ TEST_F(utColladaExport, testExportLight) {
     ASSERT_NE(pTest, nullptr);
     ASSERT_TRUE(pTest->HasLights());
 
-    const unsigned int origNumLights(pTest->mNumLights);
-    std::unique_ptr<aiLight[]> origLights(new aiLight[origNumLights]);
-    std::vector<std::string> origNames;
+    const unsigned int origNumLights = pTest->mNumLights;
+    // There are FIVE!!! LIGHTS!!!
+    EXPECT_EQ(5u, origNumLights) << "lights.dae should contain five lights";
+
+    std::vector<aiLight> origLights(5);
     for (size_t i = 0; i < origNumLights; i++) {
-        origNames.push_back(pTest->mLights[i]->mName.C_Str());
         origLights[i] = *(pTest->mLights[i]);
     }
+
+    // Check loaded first light properly
+    EXPECT_STREQ("Lamp", origLights[0].mName.C_Str());
+    EXPECT_EQ(aiLightSource_POINT, origLights[0].mType);
+    EXPECT_FLOAT_EQ(1.0f, origLights[0].mAttenuationConstant);
+    EXPECT_FLOAT_EQ(0.0f, origLights[0].mAttenuationLinear);
+    EXPECT_FLOAT_EQ(0.00111109f, origLights[0].mAttenuationQuadratic);
 
     // Common metadata
     // Confirm was loaded by the Collada importer
@@ -161,7 +172,7 @@ TEST_F(utColladaExport, testExportLight) {
 
     const aiScene *imported = im->ReadFile(file, aiProcess_ValidateDataStructure);
 
-    ASSERT_TRUE(imported != NULL);
+    ASSERT_TRUE(imported != nullptr);
 
     // Check common metadata survived roundtrip
     aiString readImporter;
@@ -191,7 +202,7 @@ TEST_F(utColladaExport, testExportLight) {
     for (size_t i = 0; i < origNumLights; i++) {
         const aiLight *orig = &origLights[i];
         const aiLight *read = imported->mLights[i];
-        EXPECT_EQ(0, strncmp(origNames[i].c_str(), read->mName.C_Str(), origNames[i].size()));
+        EXPECT_EQ(0, strcmp(orig->mName.C_Str(), read->mName.C_Str()));
         EXPECT_EQ(orig->mType, read->mType);
         EXPECT_FLOAT_EQ(orig->mAttenuationConstant, read->mAttenuationConstant);
         EXPECT_FLOAT_EQ(orig->mAttenuationLinear, read->mAttenuationLinear);
@@ -212,6 +223,9 @@ TEST_F(utColladaExport, testExportLight) {
         EXPECT_NEAR(orig->mAngleInnerCone, read->mAngleInnerCone, 0.001);
         EXPECT_NEAR(orig->mAngleOuterCone, read->mAngleOuterCone, 0.001);
     }
+
+    // Cleanup, delete the exported file
+    EXPECT_EQ(0, std::remove(file));
 }
 
 #endif // ASSIMP_BUILD_NO_EXPORT

@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -48,11 +47,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <assimp/DefaultLogger.hpp>
 
-#ifdef ASSIMP_BUILD_NO_OWN_ZLIB
-#include <zlib.h>
-#else
-#include "../contrib/zlib/zlib.h"
-#endif
+#include "zlib.h"
 
 #include <assimp/DefaultIOSystem.h>
 #include <assimp/StringComparison.h>
@@ -65,7 +60,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream>
 #include <vector>
 
-static const aiImporterDesc desc = {
+static constexpr aiImporterDesc desc = {
     "Quake III BSP Importer",
     "",
     "",
@@ -75,7 +70,7 @@ static const aiImporterDesc desc = {
     0,
     0,
     0,
-    "pk3"
+    "bsp pk3"
 };
 
 namespace Assimp {
@@ -99,7 +94,7 @@ static void extractIds(const std::string &key, int &id1, int &id2) {
         return;
     }
 
-    const std::string::size_type pos = key.find(".");
+    const std::string::size_type pos = key.find('.');
     if (std::string::npos == pos) {
         return;
     }
@@ -113,7 +108,7 @@ static void extractIds(const std::string &key, int &id1, int &id2) {
 // ------------------------------------------------------------------------------------------------
 //  Local helper function to normalize filenames.
 static void normalizePathName(const std::string &rPath, std::string &normalizedPath) {
-    normalizedPath = "";
+    normalizedPath = std::string();
     if (rPath.empty()) {
         return;
     }
@@ -139,33 +134,32 @@ static void normalizePathName(const std::string &rPath, std::string &normalizedP
 // ------------------------------------------------------------------------------------------------
 //  Constructor.
 Q3BSPFileImporter::Q3BSPFileImporter() :
-        m_pCurrentMesh(nullptr), m_pCurrentFace(nullptr), m_MaterialLookupMap(), mTextures() {
+        m_pCurrentMesh(nullptr), m_pCurrentFace(nullptr) {
     // empty
 }
 
 // ------------------------------------------------------------------------------------------------
 //  Destructor.
 Q3BSPFileImporter::~Q3BSPFileImporter() {
-    m_pCurrentMesh = nullptr;
-    m_pCurrentFace = nullptr;
+    clear();
+}
 
-    // Clear face-to-material map
+// ------------------------------------------------------------------------------------------------
+void Q3BSPFileImporter::clear() {
     for (FaceMap::iterator it = m_MaterialLookupMap.begin(); it != m_MaterialLookupMap.end(); ++it) {
         const std::string &matName = it->first;
         if (!matName.empty()) {
             delete it->second;
         }
     }
-    m_MaterialLookupMap.clear();
 }
 
 // ------------------------------------------------------------------------------------------------
-//  Returns true, if the loader can read this.
-bool Q3BSPFileImporter::CanRead(const std::string &rFile, IOSystem * /*pIOHandler*/, bool checkSig) const {
+//  Returns true if the loader can read this.
+bool Q3BSPFileImporter::CanRead(const std::string &filename, IOSystem * /*pIOHandler*/, bool checkSig) const {
     if (!checkSig) {
-        return SimpleExtensionCheck(rFile, "pk3", "bsp");
+        return SimpleExtensionCheck(filename, "pk3", "bsp");
     }
-
     return false;
 }
 
@@ -178,12 +172,13 @@ const aiImporterDesc *Q3BSPFileImporter::GetInfo() const {
 // ------------------------------------------------------------------------------------------------
 //  Import method.
 void Q3BSPFileImporter::InternReadFile(const std::string &rFile, aiScene *scene, IOSystem *ioHandler) {
+    clear();
     ZipArchiveIOSystem Archive(ioHandler, rFile);
     if (!Archive.isOpen()) {
         throw DeadlyImportError("Failed to open file ", rFile, ".");
     }
 
-    std::string archiveName(""), mapName("");
+    std::string archiveName, mapName;
     separateMapName(rFile, archiveName, mapName);
 
     if (mapName.empty()) {
@@ -194,21 +189,22 @@ void Q3BSPFileImporter::InternReadFile(const std::string &rFile, aiScene *scene,
 
     Q3BSPFileParser fileParser(mapName, &Archive);
     Q3BSPModel *pBSPModel = fileParser.getModel();
-    if (nullptr != pBSPModel) {
-        CreateDataFromImport(pBSPModel, scene, &Archive);
+    if (nullptr == pBSPModel) {
+        throw DeadlyImportError("Failed to parse Q3BSP map ", mapName, ".");
     }
+    CreateDataFromImport(pBSPModel, scene, &Archive);
 }
 
 // ------------------------------------------------------------------------------------------------
 //  Separates the map name from the import name.
 void Q3BSPFileImporter::separateMapName(const std::string &importName, std::string &archiveName, std::string &mapName) {
-    archiveName = "";
-    mapName = "";
+    archiveName = std::string();
+    mapName = std::string();
     if (importName.empty()) {
         return;
     }
 
-    const std::string::size_type pos = importName.rfind(",");
+    const std::string::size_type pos = importName.rfind(',');
     if (std::string::npos == pos) {
         archiveName = importName;
         return;
@@ -221,7 +217,7 @@ void Q3BSPFileImporter::separateMapName(const std::string &importName, std::stri
 // ------------------------------------------------------------------------------------------------
 //  Returns the first map in the map archive.
 bool Q3BSPFileImporter::findFirstMapInArchive(ZipArchiveIOSystem &bspArchive, std::string &mapName) {
-    mapName = "";
+    mapName = std::string();
     std::vector<std::string> fileList;
     bspArchive.getFileListExtension(fileList, "bsp");
     if (fileList.empty()) {
@@ -399,7 +395,10 @@ void Q3BSPFileImporter::createTriangleTopology(const Q3BSP::Q3BSPModel *pModel, 
                 m_pCurrentFace->mIndices = new unsigned int[3];
                 m_pCurrentFace->mIndices[idx] = vertIdx;
             }
-        }
+		} else {
+			m_pCurrentFace->mIndices[idx] = vertIdx;
+		}
+
 
         pMesh->mVertices[vertIdx].Set(pVertex->vPosition.x, pVertex->vPosition.y, pVertex->vPosition.z);
         pMesh->mNormals[vertIdx].Set(pVertex->vNormal.x, pVertex->vNormal.y, pVertex->vNormal.z);
@@ -440,13 +439,13 @@ void Q3BSPFileImporter::createMaterials(const Q3BSP::Q3BSPModel *pModel, aiScene
         if (-1 != textureId) {
             sQ3BSPTexture *pTexture = pModel->m_Textures[textureId];
             if (nullptr != pTexture) {
-                std::string tmp("*"), texName("");
+                std::string tmp("*"), texName;
                 tmp += pTexture->strName;
                 tmp += ".jpg";
                 normalizePathName(tmp, texName);
 
                 if (!importTextureFromArchive(pModel, pArchive, pScene, pMatHelper, textureId)) {
-                    ASSIMP_LOG_ERROR("Cannot import texture from archive " + texName);
+                    ASSIMP_LOG_ERROR("Cannot import texture from archive ", texName);
                 }
             }
         }
@@ -512,7 +511,7 @@ size_t Q3BSPFileImporter::countTriangles(const std::vector<Q3BSP::sQ3BSPFace *> 
 // ------------------------------------------------------------------------------------------------
 //  Creates the faces-to-material map.
 void Q3BSPFileImporter::createMaterialMap(const Q3BSP::Q3BSPModel *pModel) {
-    std::string key("");
+    std::string key;
     std::vector<sQ3BSPFace *> *pCurFaceArray = nullptr;
     for (size_t idx = 0; idx < pModel->m_Faces.size(); idx++) {
         Q3BSP::sQ3BSPFace *pQ3BSPFace = pModel->m_Faces[idx];
@@ -565,9 +564,9 @@ bool Q3BSPFileImporter::importTextureFromArchive(const Q3BSP::Q3BSPModel *model,
     }
 
     std::vector<std::string> supportedExtensions;
-    supportedExtensions.push_back(".jpg");
-    supportedExtensions.push_back(".png");
-    supportedExtensions.push_back(".tga");
+    supportedExtensions.emplace_back(".jpg");
+    supportedExtensions.emplace_back(".png");
+    supportedExtensions.emplace_back(".tga");
     std::string textureName, ext;
     if (expandFile(archive, pTexture->strName, supportedExtensions, textureName, ext)) {
         IOStream *pTextureStream = archive->Open(textureName.c_str());
@@ -589,7 +588,7 @@ bool Q3BSPFileImporter::importTextureFromArchive(const Q3BSP::Q3BSPModel *model,
 
             aiString name;
             name.data[0] = '*';
-            name.length = 1 + ASSIMP_itoa10(name.data + 1, static_cast<unsigned int>(MAXLEN - 1), static_cast<int32_t>(mTextures.size()));
+            name.length = 1 + ASSIMP_itoa10(name.data + 1, static_cast<unsigned int>(AI_MAXLEN - 1), static_cast<int32_t>(mTextures.size()));
 
             archive->Close(pTextureStream);
 
@@ -599,8 +598,7 @@ bool Q3BSPFileImporter::importTextureFromArchive(const Q3BSP::Q3BSPModel *model,
             // If it doesn't exist in the archive, it is probably just a reference to an external file.
             // We'll leave it up to the user to figure out which extension the file has.
             aiString name;
-            strncpy(name.data, pTexture->strName, sizeof name.data);
-            name.length = static_cast<ai_uint32>(strlen(name.data));
+            name.Set(pTexture->strName, sizeof(name.data));
             pMatHelper->AddProperty(&name, AI_MATKEY_TEXTURE_DIFFUSE(0));
         }
     }
@@ -642,7 +640,7 @@ bool Q3BSPFileImporter::importLightmap(const Q3BSP::Q3BSPModel *pModel, aiScene 
 
     aiString name;
     name.data[0] = '*';
-    name.length = 1 + ASSIMP_itoa10(name.data + 1, static_cast<unsigned int>(MAXLEN - 1), static_cast<int32_t>(mTextures.size()));
+    name.length = 1 + ASSIMP_itoa10(name.data + 1, static_cast<unsigned int>(AI_MAXLEN - 1), static_cast<int32_t>(mTextures.size()));
 
     pMatHelper->AddProperty(&name, AI_MATKEY_TEXTURE_LIGHTMAP(1));
     mTextures.push_back(pTexture);
@@ -660,7 +658,7 @@ bool Q3BSPFileImporter::expandFile(ZipArchiveIOSystem *pArchive, const std::stri
 
     if (rExtList.empty()) {
         rFile = rFilename;
-        rExt = "";
+        rExt = std::string();
         return true;
     }
 

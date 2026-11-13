@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -57,40 +56,81 @@ struct aiNode;
 struct aiMaterial;
 struct aiMesh;
 
-namespace Assimp
-{
+namespace Assimp {
 
 // ------------------------------------------------------------------------------------------------
 /**
  *  @brief  Helper class to export a given scene to a 3DS file.
  */
 // ------------------------------------------------------------------------------------------------
-class Discreet3DSExporter {
+class Discreet3DSExporter final {
 public:
+    /// Constructor for a specific scene to export
+    /// @param outfile Output file stream
+    /// @param pScene Scene to export
     Discreet3DSExporter(std::shared_ptr<IOStream> &outfile, const aiScene* pScene);
-    ~Discreet3DSExporter();
+
+    /// Destructor
+    ~Discreet3DSExporter() = default;
 
 private:
+    /// Writes all meshes in the scene to the output file
     void WriteMeshes();
+
+    /// Writes all materials in the scene to the output file
     void WriteMaterials();
-    void WriteTexture(const aiMaterial& mat, aiTextureType type, uint16_t chunk_flags);
+
+    /// Writes texture information for a material
+    /// @param mat Material to write texture for
+    /// @param type Texture type (e.g., aiTextureType_DIFFUSE)
+    /// @param chunk_flags 3DS chunk flags for the texture
+    /// @return true if texture was written successfully, false otherwise
+    bool WriteTexture(const aiMaterial& mat, aiTextureType type, uint16_t chunk_flags);
+
+    /// Writes face material chunk for a mesh
+    /// @param mesh Mesh to write face material for
     void WriteFaceMaterialChunk(const aiMesh& mesh);
+
+    /// Writes the node hierarchy to the output file
+    /// @param node Current node to process
+    /// @param level Current hierarchy level
+    /// @param sibling_level Sibling level for hierarchy tracking
+    /// @return Next sequence number for hierarchy
     int WriteHierarchy(const aiNode& node, int level, int sibling_level);
+
+    /// Writes a string to the output stream
+    /// @param s String to write
     void WriteString(const std::string& s);
+
+    /// Writes an aiString to the output stream
+    /// @param s aiString to write
     void WriteString(const aiString& s);
+
+    /// Writes a color to the output stream
+    /// @param color Color to write
     void WriteColor(const aiColor3D& color);
+
+    /// Writes a percentage value as float to the output stream
+    /// @param f Percentage value to write
     void WritePercentChunk(float f);
+
+    /// Writes a percentage value as double to the output stream
+    /// @param f Percentage value to write
     void WritePercentChunk(double f);
 
 private:
+    /// The scene to be exported
     const aiScene* const scene;
+
+    /// Stream writer for output
     StreamWriterLE writer;
 
+    /// World transformations for each node
     std::map<const aiNode*, aiMatrix4x4> trafos;
 
-    typedef std::multimap<const aiNode*, unsigned int> MeshesByNodeMap;
+    /// Meshes organized by node
+    using MeshesByNodeMap = std::multimap<const aiNode*, unsigned int>;
     MeshesByNodeMap meshes;
-
 };
 
 } // Namespace Assimp

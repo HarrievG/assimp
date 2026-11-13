@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -53,7 +53,7 @@ using namespace Assimp;
 
 class utFBXImporterExporter : public AbstractImportExportBase {
 public:
-    virtual bool importerTest() {
+    bool importerTest() override {
         Assimp::Importer importer;
         const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/spider.fbx", aiProcess_ValidateDataStructure);
         return nullptr != scene;
@@ -62,6 +62,45 @@ public:
 
 TEST_F(utFBXImporterExporter, importXFromFileTest) {
     EXPECT_TRUE(importerTest());
+}
+
+TEST_F(utFBXImporterExporter, importEmbeddedTextureNumericUV) {
+    for (const char *variant : { "integer", "float", "double", "override" }) {
+        SCOPED_TRACE(variant);
+        const std::string path = std::string(ASSIMP_TEST_MODELS_DIR) + "/FBX/embedded_" + variant + "_uv.fbx";
+        Assimp::Importer importer;
+        const aiScene *scene = importer.ReadFile(path, aiProcess_ValidateDataStructure);
+        ASSERT_NE(nullptr, scene) << importer.GetErrorString();
+        ASSERT_EQ(1u, scene->mNumMeshes);
+        ASSERT_EQ(1u, scene->mNumMaterials);
+        ASSERT_EQ(1u, scene->mNumTextures);
+        ASSERT_EQ(21u, scene->mTextures[0]->mWidth);
+        EXPECT_EQ(0u, scene->mTextures[0]->mHeight);
+        ASSERT_NE(nullptr, scene->mTextures[0]->pcData);
+        const auto *pixel = reinterpret_cast<const unsigned char *>(scene->mTextures[0]->pcData);
+        EXPECT_EQ(255u, pixel[20]);
+        EXPECT_STREQ("tga", scene->mTextures[0]->achFormatHint);
+        const aiMaterial *material = scene->mMaterials[0];
+        aiString texture;
+        ASSERT_EQ(AI_SUCCESS, material->GetTexture(aiTextureType_DIFFUSE, 0, &texture));
+        EXPECT_EQ(scene->mTextures[0], scene->GetEmbeddedTexture(texture.C_Str()));
+        aiUVTransform uv;
+        ASSERT_EQ(AI_SUCCESS, material->Get(AI_MATKEY_UVTRANSFORM(aiTextureType_DIFFUSE, 0), uv));
+        const bool overridden = std::string(variant) == "override";
+        EXPECT_FLOAT_EQ(overridden ? 6.f : -2.f, uv.mTranslation.x);
+        EXPECT_FLOAT_EQ(overridden ? 7.f : 3.f, uv.mTranslation.y);
+        EXPECT_FLOAT_EQ(overridden ? 8.f : 4.f, uv.mScaling.x);
+        EXPECT_FLOAT_EQ(overridden ? 9.f : 5.f, uv.mScaling.y);
+    }
+}
+
+TEST_F(utFBXImporterExporter, rejectNonNumericTextureUV) {
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/embedded_invalid_uv.fbx", 0);
+    ASSERT_NE(nullptr, scene) << importer.GetErrorString();
+    ASSERT_EQ(1u, scene->mNumMaterials);
+    EXPECT_EQ(0u, scene->mNumTextures);
+    EXPECT_EQ(0u, scene->mMaterials[0]->GetTextureCount(aiTextureType_DIFFUSE));
 }
 
 TEST_F(utFBXImporterExporter, importBareBoxWithoutColorsAndTextureCoords) {
@@ -311,6 +350,37 @@ TEST_F(utFBXImporterExporter, sceneMetadata) {
     }
 }
 
+TEST_F(utFBXImporterExporter, importCustomAxes) {
+    // see https://github.com/assimp/assimp/issues/5494
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/embedded_ascii/box.FBX", aiProcess_ValidateDataStructure);
+    EXPECT_NE(nullptr, scene);
+
+    // The ASCII box has customised the Up and Forward axes, verify that the RootNode transform has applied it
+    ASSERT_FALSE(scene->mRootNode->mTransformation.IsIdentity()) << "Did not apply the custom axis transform";
+
+    aiVector3D upVec{ 0, 0, 1 }; // Up is +Z
+    aiVector3D forwardVec{ 0, -1, 0 }; // Forward is -Y
+    aiVector3D rightVec{ 1, 0, 0 }; // Right is +X
+    aiMatrix4x4 mat(rightVec.x, rightVec.y, rightVec.z, 0.0f,
+            upVec.x, upVec.y, upVec.z, 0.0f,
+            forwardVec.x, forwardVec.y, forwardVec.z, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f);
+
+    EXPECT_EQ(mat, scene->mRootNode->mTransformation);
+}
+
+TEST_F(utFBXImporterExporter, importIgnoreCustomAxes) {
+    // see https://github.com/assimp/assimp/issues/5494
+    Assimp::Importer importer;
+    importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_IGNORE_UP_DIRECTION, true);
+    const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/embedded_ascii/box.FBX", aiProcess_ValidateDataStructure);
+    EXPECT_NE(nullptr, scene);
+
+    // Verify that the RootNode transform has NOT applied the custom axes
+    EXPECT_TRUE(scene->mRootNode->mTransformation.IsIdentity());
+}
+
 TEST_F(utFBXImporterExporter, importCubesWithOutOfRangeFloat) {
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/cubes_with_outofrange_float.fbx", aiProcess_ValidateDataStructure);
@@ -365,7 +435,7 @@ TEST_F(utFBXImporterExporter, importMaxPbrMaterialsMetalRoughness) {
     float bumpMapAmt; // Presumably amount.
     ASSERT_EQ(mat->Get("$raw.3dsMax|main|bump_map_amt", aiTextureType_NONE, 0, bumpMapAmt), aiReturn_SUCCESS);
     EXPECT_EQ(bumpMapAmt, 0.75f);
-    
+
     aiColor4D emitColor;
     ASSERT_EQ(mat->Get("$raw.3dsMax|main|emit_color", aiTextureType_NONE, 0, emitColor), aiReturn_SUCCESS);
     EXPECT_EQ(emitColor, aiColor4D(1, 1, 0, 1));
@@ -418,8 +488,63 @@ TEST_F(utFBXImporterExporter, importMaxPbrMaterialsSpecularGloss) {
     float bumpMapAmt; // Presumably amount.
     ASSERT_EQ(mat->Get("$raw.3dsMax|main|bump_map_amt", aiTextureType_NONE, 0, bumpMapAmt), aiReturn_SUCCESS);
     EXPECT_EQ(bumpMapAmt, 0.66f);
-    
+
     aiColor4D emitColor;
     ASSERT_EQ(mat->Get("$raw.3dsMax|main|emit_color", aiTextureType_NONE, 0, emitColor), aiReturn_SUCCESS);
     EXPECT_EQ(emitColor, aiColor4D(1, 0, 1, 1));
+}
+
+TEST_F(utFBXImporterExporter, importSkeletonTest) {
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFile(ASSIMP_TEST_MODELS_DIR "/FBX/animation_with_skeleton.fbx", aiProcess_ValidateDataStructure);
+    ASSERT_NE(nullptr, scene);
+    ASSERT_TRUE(scene->mRootNode);
+}
+
+namespace {
+
+std::string fbxTriangleWithLastIndex(const char *lastIndex) {
+    return std::string(
+            "; FBX 7.4.0 project file\n"
+            "FBXHeaderExtension:  {\n"
+            "\tFBXHeaderVersion: 1003\n"
+            "\tFBXVersion: 7400\n"
+            "}\n"
+            "Objects:  {\n"
+            "\tGeometry: 10, \"Geometry::\", \"Mesh\" {\n"
+            "\t\tVertices: *9 {\n"
+            "\t\t\ta: 0,0,0,1,0,0,0,1,0\n"
+            "\t\t}\n"
+            "\t\tPolygonVertexIndex: *3 {\n"
+            "\t\t\ta: 0,1,") +
+           lastIndex +
+           "\n"
+           "\t\t}\n"
+           "\t}\n"
+           "\tModel: 20, \"Model::triangle\", \"Mesh\" {\n"
+           "\t}\n"
+           "}\n"
+           "Connections:  {\n"
+           "\tC: \"OO\",10,20\n"
+           "\tC: \"OO\",20,0\n"
+           "}\n";
+}
+
+} // namespace
+
+TEST_F(utFBXImporterExporter, importPolygonVertexIndexIntMin) {
+    // The last index of a polygon is stored as -(vertex + 1); decoding INT_MIN
+    // must not overflow, and it is out of range for the mesh.
+    Assimp::Importer importer;
+    const std::string valid = fbxTriangleWithLastIndex("-3");
+    const aiScene *scene = importer.ReadFileFromMemory(valid.data(), valid.size(), aiProcess_ValidateDataStructure, "fbx");
+    ASSERT_NE(nullptr, scene);
+    ASSERT_EQ(1u, scene->mNumMeshes);
+    EXPECT_EQ(1u, scene->mMeshes[0]->mNumFaces);
+
+    // The geometry is rejected as out of range, so the triangle mesh is not imported.
+    const std::string intMin = fbxTriangleWithLastIndex("-2147483648");
+    scene = importer.ReadFileFromMemory(intMin.data(), intMin.size(), aiProcess_ValidateDataStructure, "fbx");
+    ASSERT_NE(nullptr, scene);
+    EXPECT_EQ(0u, scene->mNumMeshes);
 }

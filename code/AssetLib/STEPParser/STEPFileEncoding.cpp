@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -45,11 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "STEPFileEncoding.h"
 #include <assimp/fast_atof.h>
-#ifdef ASSIMP_USE_HUNTER
-#  include <utf8.h>
-#else
-#  include <contrib/utf8cpp/source/utf8.h>
-#endif
+#include "utf8.h"
 
 #include <memory>
 
@@ -294,9 +289,14 @@ bool STEP::StringToUTF8(std::string& s)
         if (s[i] == '\\') {
             // \S\X - cp1252 (X is the character remapped to [0,127])
             if (i+3 < s.size() && s[i+1] == 'S' && s[i+2] == '\\') {
-                // http://stackoverflow.com/questions/5586214/how-to-convert-char-from-iso-8859-1-to-utf-8-in-c-multiplatformly
-                ai_assert((uint8_t)s[i+3] < 0x80);
-                const uint8_t ch = s[i+3] + 0x80;
+                // STEP encodes \S\X using an ASCII byte remapped into the CP1252 upper half.
+                // Bytes outside the [0,127] range are malformed input and must be rejected
+                // without tripping debug asserts.
+                const auto cp1252LowHalf = static_cast<uint8_t>(s[i+3]);
+                if (cp1252LowHalf >= 0x80) {
+                    return false;
+                }
+                const uint8_t ch = cp1252LowHalf + 0x80;
 
                 s[i] = 0xc0 | (ch & 0xc0) >> 6;
                 s[i+1] =  0x80 | (ch & 0x3f);
@@ -306,7 +306,6 @@ bool STEP::StringToUTF8(std::string& s)
             }
             // \X\xx - mac/roman (xx is a hex sequence)
             else if (i+4 < s.size() && s[i+1] == 'X' && s[i+2] == '\\') {
-
                 const uint8_t macval = HexOctetToDecimal(s.c_str() + i + 3);
                 if(macval < 0x20) {
                     return false;
@@ -319,7 +318,7 @@ bool STEP::StringToUTF8(std::string& s)
                 unsigned char temp[5], *tempp = temp;
                 ai_assert(sizeof( unsigned char ) == 1);
 
-                utf8::utf32to8( univalp, univalp + 1, tempp );
+                utf8::utf32to8(univalp, univalp + 1, tempp );
 
                 const size_t outcount = static_cast<size_t>(tempp-temp);
 

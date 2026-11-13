@@ -1,8 +1,8 @@
-/*
+ /*
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2020, assimp team
+Copyright (c) 2006-2026, assimp team
 All rights reserved.
 
 Redistribution and use of this software in source and binary forms,
@@ -46,18 +46,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // no #ifdefing here, Cinema4D support is carried out in a branch of assimp
 // where it is turned on in the CMake settings.
 
-#ifndef _MSC_VER
-#   error C4D support is currently MSVC only
-#endif
-
 #include "C4DImporter.h"
-#include <assimp/TinyFormatter.h>
 #include <memory>
 #include <assimp/IOSystem.hpp>
 #include <assimp/scene.h>
 #include <assimp/ai_assert.h>
 
-#if defined(_M_X64) || defined(__amd64__)
+#if defined(_M_X64) || defined(__amd64__) || defined(_M_ARM64) || defined(__aarch64__)
 #   define __C4D_64BIT
 #endif
 
@@ -65,7 +60,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "c4d_file.h"
 #include "default_alien_overloads.h"
 
-using namespace melange;
+namespace {
+
+aiString aiStringFrom(cineware::String const & cinestring) {
+    aiString result;
+    cinestring.GetCString(result.data, AI_MAXLEN - 1);
+    result.length = static_cast<ai_uint32>(cinestring.GetLength());
+    return result;
+}
+
+}
+
+using namespace Assimp;
+using namespace cineware;
 
 // overload this function and fill in your own unique data
 void GetWriterInfo(int &id, String &appname) {
@@ -73,17 +80,13 @@ void GetWriterInfo(int &id, String &appname) {
     appname = "Open Asset Import Library";
 }
 
-using namespace Assimp;
-using namespace Assimp::Formatter;
-
 namespace Assimp {
     template<> const char* LogFunctions<C4DImporter>::Prefix() {
-        static auto prefix = "C4D: ";
-        return prefix;
+        return "C4D: ";
     }
 }
 
-static const aiImporterDesc desc = {
+static constexpr aiImporterDesc desc = {
     "Cinema4D Importer",
     "",
     "",
@@ -95,18 +98,6 @@ static const aiImporterDesc desc = {
     0,
     "c4d"
 };
-
-
-// ------------------------------------------------------------------------------------------------
-C4DImporter::C4DImporter()
-: BaseImporter() {
-    // empty
-}
-
-// ------------------------------------------------------------------------------------------------
-C4DImporter::~C4DImporter() {
-    // empty
-}
 
 // ------------------------------------------------------------------------------------------------
 bool C4DImporter::CanRead( const std::string& pFile, IOSystem* pIOHandler, bool checkSig) const {
@@ -124,12 +115,6 @@ bool C4DImporter::CanRead( const std::string& pFile, IOSystem* pIOHandler, bool 
 const aiImporterDesc* C4DImporter::GetInfo () const {
     return &desc;
 }
-
-// ------------------------------------------------------------------------------------------------
-void C4DImporter::SetupProperties(const Importer* /*pImp*/) {
-    // nothing to be done for the moment
-}
-
 
 // ------------------------------------------------------------------------------------------------
 // Imports the given file into the given scene structure.
@@ -154,7 +139,13 @@ void C4DImporter::InternReadFile( const std::string& pFile, aiScene* pScene, IOS
         ThrowException("failed to read document " + pFile);
     }
 
+    // Generate the root-node
     pScene->mRootNode = new aiNode("<C4DRoot>");
+
+    // convert left-handed to right-handed
+    pScene->mRootNode->mTransformation.a1 = 0.01f;
+    pScene->mRootNode->mTransformation.b2 = 0.01f;
+    pScene->mRootNode->mTransformation.c3 = -0.01f;
 
     // first convert all materials
     ReadMaterials(doc->GetFirstMaterial());
@@ -197,10 +188,9 @@ void C4DImporter::InternReadFile( const std::string& pFile, aiScene* pScene, IOS
     std::copy(materials.begin(), materials.end(), pScene->mMaterials);
 }
 
-
 // ------------------------------------------------------------------------------------------------
-bool C4DImporter::ReadShader(aiMaterial* out, melange::BaseShader* shader) {
-    // based on Melange sample code (C4DImportExport.cpp)
+bool C4DImporter::ReadShader(aiMaterial* out, BaseShader* shader) {
+    // based on Cineware sample code (C4DImportExport.cpp)
     while(shader) {
         if(shader->GetType() == Xlayer) {
             BaseContainer* container = shader->GetDataInstance();
@@ -242,13 +232,11 @@ bool C4DImporter::ReadShader(aiMaterial* out, melange::BaseShader* shader) {
                 lsl = lsl->GetNext();
             }
         } else if ( shader->GetType() == Xbitmap ) {
-            aiString path;
-            shader->GetFileName().GetString().GetCString(path.data, MAXLEN-1);
-            path.length = ::strlen(path.data);
+            auto const path = aiStringFrom(shader->GetFileName().GetString());
             out->AddProperty(&path, AI_MATKEY_TEXTURE_DIFFUSE(0));
             return true;
         } else {
-            LogWarn("ignoring shader type: " + std::string(GetObjectTypeName(shader->GetType())));
+            LogWarn("ignoring shader type: ", GetObjectTypeName(shader->GetType()));
         }
         shader = shader->GetNext();
     }
@@ -257,18 +245,15 @@ bool C4DImporter::ReadShader(aiMaterial* out, melange::BaseShader* shader) {
 }
 
 // ------------------------------------------------------------------------------------------------
-void C4DImporter::ReadMaterials(melange::BaseMaterial* mat) {
-    // based on Melange sample code
+void C4DImporter::ReadMaterials(BaseMaterial* mat) {
+    // based on Cineware sample code
     while (mat) {
-        const String& name = mat->GetName();
         if (mat->GetType() == Mmaterial) {
             aiMaterial* out = new aiMaterial();
             material_mapping[mat] = static_cast<unsigned int>(materials.size());
             materials.push_back(out);
 
-            aiString ai_name;
-            name.GetCString(ai_name.data, MAXLEN-1);
-            ai_name.length = ::strlen(ai_name.data);
+            auto const ai_name = aiStringFrom(mat->GetName());
             out->AddProperty(&ai_name, AI_MATKEY_NAME);
 
             Material& m = dynamic_cast<Material&>(*mat);
@@ -294,7 +279,7 @@ void C4DImporter::ReadMaterials(melange::BaseMaterial* mat) {
                 ReadShader(out, shader);
             }
         } else {
-            LogWarn("ignoring plugin material: " + std::string(GetObjectTypeName(mat->GetType())));
+            LogWarn("ignoring plugin material: ", GetObjectTypeName(mat->GetType()));
         }
         mat = mat->GetNext();
     }
@@ -305,19 +290,15 @@ void C4DImporter::RecurseHierarchy(BaseObject* object, aiNode* parent) {
     ai_assert(parent != nullptr );
     std::vector<aiNode*> nodes;
 
-    // based on Melange sample code
+    // based on Cineware sample code
     while (object) {
-        const String& name = object->GetName();
-        const LONG type = object->GetType();
+        const Int32 type = object->GetType();
         const Matrix& ml = object->GetMl();
 
-        aiString string;
-        name.GetCString(string.data, MAXLEN-1);
-        string.length = ::strlen(string.data);
         aiNode* const nd = new aiNode();
 
         nd->mParent = parent;
-        nd->mName = string;
+        nd->mName = aiStringFrom(object->GetName());
 
         nd->mTransformation.a1 = ml.v1.x;
         nd->mTransformation.b1 = ml.v1.y;
@@ -352,7 +333,7 @@ void C4DImporter::RecurseHierarchy(BaseObject* object, aiNode* parent) {
                 meshes.push_back(mesh);
             }
         } else {
-            LogWarn("ignoring object: " + std::string(GetObjectTypeName(type)));
+            LogWarn("ignoring object: ", GetObjectTypeName(type));
         }
 
         RecurseHierarchy(object->GetDown(), nd);
@@ -370,12 +351,12 @@ aiMesh* C4DImporter::ReadMesh(BaseObject* object) {
     ai_assert(object != nullptr);
     ai_assert( object->GetType() == Opolygon );
 
-    // based on Melange sample code
+    // based on Cineware sample code
     PolygonObject* const polyObject = dynamic_cast<PolygonObject*>(object);
     ai_assert(polyObject != nullptr);
 
-    const LONG pointCount = polyObject->GetPointCount();
-    const LONG polyCount = polyObject->GetPolygonCount();
+    const Int32 pointCount = polyObject->GetPointCount();
+    const Int32 polyCount = polyObject->GetPolygonCount();
     if(!polyObject || !pointCount) {
         LogWarn("ignoring mesh with zero vertices or faces");
         return nullptr;
@@ -397,7 +378,7 @@ aiMesh* C4DImporter::ReadMesh(BaseObject* object) {
     unsigned int vcount = 0;
 
     // first count vertices
-    for (LONG i = 0; i < polyCount; i++)
+    for (Int32 i = 0; i < polyCount; i++)
     {
         vcount += 3;
 
@@ -440,7 +421,7 @@ aiMesh* C4DImporter::ReadMesh(BaseObject* object) {
     }
 
     // copy vertices and extra channels over and populate faces
-    for (LONG i = 0; i < polyCount; ++i, ++face) {
+    for (Int32 i = 0; i < polyCount; ++i, ++face) {
         ai_assert(polys[i].a < pointCount && polys[i].a >= 0);
         const Vector& pointA = points[polys[i].a];
         verts->x = pointA.x;
@@ -517,7 +498,7 @@ aiMesh* C4DImporter::ReadMesh(BaseObject* object) {
         if (tangents_src) {
 
             for(unsigned int k = 0; k < face->mNumIndices; ++k) {
-                LONG l;
+                Int32 l;
                 switch(k) {
                 case 0:
                     l = polys[i].a;
@@ -618,4 +599,3 @@ unsigned int C4DImporter::ResolveMaterial(PolygonObject* obj) {
 }
 
 #endif // ASSIMP_BUILD_NO_C4D_IMPORTER
-

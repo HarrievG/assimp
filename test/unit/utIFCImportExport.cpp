@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -76,5 +76,23 @@ TEST_F(utIFCImportExport, importComplextypeAsColor) {
             "#5 = IFCCOMPLEXPROPERTY( 'Color', $, 'Color', ( #19, #20, #21 ) );\n";
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFileFromMemory(asset.c_str(), asset.size(), 0);
+    EXPECT_EQ(nullptr, scene);
+}
+
+TEST_F(utIFCImportExport, rejectsInvalidStepCp1252EscapeInSchema) {
+    std::string asset =
+            "ISO-10303-21;\n"
+            "HEADER;\n"
+            "FILE_SCHEMA( ( 'IFC2X3\\S\\";
+    asset.push_back(static_cast<char>(0x80));
+    asset +=
+            "' ) );\n"
+            "ENDSEC;\n"
+            "DATA;\n"
+            "ENDSEC;\n"
+            "END-ISO-10303-21;\n";
+
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFileFromMemory(asset.data(), asset.size(), 0, "ifc");
     EXPECT_EQ(nullptr, scene);
 }

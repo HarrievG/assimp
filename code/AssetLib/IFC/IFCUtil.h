@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -47,12 +46,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INCLUDED_IFCUTIL_H
 #define INCLUDED_IFCUTIL_H
 
-#include "AssetLib/IFC/IFCReaderGen_2x3.h"
-#include "AssetLib/IFC/IFCLoader.h"
+#include "IFCReaderGen_2x3.h"
+#include "IFCLoader.h"
 #include "AssetLib/Step/STEPFile.h"
 
 #include <assimp/mesh.h>
 #include <assimp/material.h>
+
+#include <utility>
 
 struct aiNode;
 
@@ -137,14 +138,10 @@ struct TempOpening
     }
 
     // ------------------------------------------------------------------------------
-    TempOpening(const IFC::Schema_2x3::IfcSolidModel* solid,IfcVector3 extrusionDir,
-        std::shared_ptr<TempMesh> profileMesh,
-        std::shared_ptr<TempMesh> profileMesh2D)
-        : solid(solid)
-        , extrusionDir(extrusionDir)
-        , profileMesh(profileMesh)
-        , profileMesh2D(profileMesh2D)
-    {
+    TempOpening(const IFC::Schema_2x3::IfcSolidModel *solid, IfcVector3 extrusionDir,
+            std::shared_ptr<TempMesh> profileMesh,
+            std::shared_ptr<TempMesh> profileMesh2D) :
+            solid(solid), extrusionDir(extrusionDir), profileMesh(std::move(profileMesh)), profileMesh2D(std::move(profileMesh2D)) {
     }
 
     // ------------------------------------------------------------------------------
@@ -309,7 +306,6 @@ void ProcessBooleanExtrudedAreaSolidDifference(const Schema_2x3::IfcExtrudedArea
 // IFCOpenings.cpp
 
 bool GenerateOpenings(std::vector<TempOpening>& openings,
-                      const std::vector<IfcVector3>& nors,
                       TempMesh& curmesh,
                       bool check_intersection,
                       bool generate_connection_geometry,
@@ -347,8 +343,7 @@ protected:
 public:
     typedef std::pair<IfcFloat, IfcFloat> ParamRange;
 
-    virtual ~Curve() {}
-
+    virtual ~Curve() = default;
 
     // check if a curve is closed
     virtual bool IsClosed() const = 0;

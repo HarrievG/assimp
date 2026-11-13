@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -61,6 +61,14 @@ namespace FBX {
 
 using namespace Util;
 
+static float ParseTextureUVComponent(const Token &token) {
+    // Metashape can store these coordinates as binary int32 rather than float/double.
+    if (token.IsBinary() && token.begin() != token.end() && *token.begin() == 'I') {
+        return static_cast<float>(ParseTokenAsInt(token));
+    }
+    return ParseTokenAsFloat(token);
+}
+
 // ------------------------------------------------------------------------------------------------
 Material::Material(uint64_t id, const Element& element, const Document& doc, const std::string& name) :
         Object(id,element,name) {
@@ -82,7 +90,7 @@ Material::Material(uint64_t id, const Element& element, const Document& doc, con
 
     // lower-case shading because Blender (for example) writes "Phong"
     for (size_t i = 0; i < shading.length(); ++i) {
-        shading[i] = static_cast<char>(tolower(shading[i]));
+        shading[i] = static_cast<char>(tolower(static_cast<unsigned char>(shading[i])));
     }
     std::string templateName;
     if(shading == "phong") {
@@ -134,17 +142,18 @@ Material::Material(uint64_t id, const Element& element, const Document& doc, con
     }
 }
 
-
-// ------------------------------------------------------------------------------------------------
-Material::~Material() {
-    // empty
-}
-
 // ------------------------------------------------------------------------------------------------
 Texture::Texture(uint64_t id, const Element& element, const Document& doc, const std::string& name) :
-        Object(id,element,name), 
-        uvScaling(1.0f,1.0f), 
-        media(0) {
+        Object(id,element,name),
+        uvTrans(0.0f, 0.0f),
+        uvScaling(1.0f,1.0f),
+        uvRotation(0.0f),
+        type(),
+        relativeFileName(),
+        fileName(),
+        alphaSource(),
+        props(),
+        media(nullptr) {
     const Scope& sc = GetRequiredScope(element);
 
     const Element* const Type = sc["Type"];
@@ -168,15 +177,13 @@ Texture::Texture(uint64_t id, const Element& element, const Document& doc, const
     }
 
     if(ModelUVTranslation) {
-        uvTrans = aiVector2D(ParseTokenAsFloat(GetRequiredToken(*ModelUVTranslation,0)),
-            ParseTokenAsFloat(GetRequiredToken(*ModelUVTranslation,1))
-        );
+        uvTrans = aiVector2D(ParseTextureUVComponent(GetRequiredToken(*ModelUVTranslation, 0)),
+                ParseTextureUVComponent(GetRequiredToken(*ModelUVTranslation, 1)));
     }
 
     if(ModelUVScaling) {
-        uvScaling = aiVector2D(ParseTokenAsFloat(GetRequiredToken(*ModelUVScaling,0)),
-            ParseTokenAsFloat(GetRequiredToken(*ModelUVScaling,1))
-        );
+        uvScaling = aiVector2D(ParseTextureUVComponent(GetRequiredToken(*ModelUVScaling, 0)),
+                ParseTextureUVComponent(GetRequiredToken(*ModelUVScaling, 1)));
     }
 
     if(Cropping) {
@@ -210,6 +217,11 @@ Texture::Texture(uint64_t id, const Element& element, const Document& doc, const
         uvTrans.y = trans.y;
     }
 
+    const aiVector3D &rotation = PropertyGet<aiVector3D>(*props, "Rotation", ok);
+    if (ok) {
+        uvRotation = rotation.z;
+    }
+
     // resolve video links
     if(doc.Settings().readTextures) {
         const std::vector<const Connection*>& conns = doc.GetConnectionsByDestinationSequenced(ID());
@@ -229,9 +241,7 @@ Texture::Texture(uint64_t id, const Element& element, const Document& doc, const
 }
 
 
-Texture::~Texture() {
-    // empty
-}
+Texture::~Texture() = default;
 
 LayeredTexture::LayeredTexture(uint64_t id, const Element& element, const Document& /*doc*/, const std::string& name) :
         Object(id,element,name),
@@ -250,9 +260,7 @@ LayeredTexture::LayeredTexture(uint64_t id, const Element& element, const Docume
     }
 }
 
-LayeredTexture::~LayeredTexture() {
-    // empty
-}
+LayeredTexture::~LayeredTexture() = default;
 
 void LayeredTexture::fillTexture(const Document& doc) {
     const std::vector<const Connection*>& conns = doc.GetConnectionsByDestinationSequenced(ID());
@@ -272,10 +280,10 @@ void LayeredTexture::fillTexture(const Document& doc) {
 }
 
 // ------------------------------------------------------------------------------------------------
-Video::Video(uint64_t id, const Element& element, const Document& doc, const std::string& name) :
-        Object(id,element,name), 
-        contentLength(0), 
-        content(0) {
+Video::Video(uint64_t id, const Element &element, const Document &doc, const std::string &name) :
+        Object(id, element, name),
+        contentLength(0),
+        content(nullptr) {
     const Scope& sc = GetRequiredScope(element);
 
     const Element* const Type = sc["Type"];
@@ -352,7 +360,7 @@ Video::Video(uint64_t id, const Element& element, const Document& doc, const std
             }
         } catch (const runtime_error& runtimeError) {
             //we don't need the content data for contents that has already been loaded
-            ASSIMP_LOG_VERBOSE_DEBUG_F("Caught exception in FBXMaterial (likely because content was already loaded): ",
+            ASSIMP_LOG_VERBOSE_DEBUG("Caught exception in FBXMaterial (likely because content was already loaded): ",
                     runtimeError.what());
         }
     }
@@ -360,9 +368,10 @@ Video::Video(uint64_t id, const Element& element, const Document& doc, const std
     props = GetPropertyTable(doc,"Video.FbxVideo",element,sc);
 }
 
-
 Video::~Video() {
-    delete[] content;
+    if (contentLength > 0) {
+        delete[] content;
+    }
 }
 
 } //!FBX

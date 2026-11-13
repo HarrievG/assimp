@@ -2,8 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
-
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -39,6 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----------------------------------------------------------------------
 */
+#pragma once
 #ifndef AI_OPENGEX_IMPORTER_H
 #define AI_OPENGEX_IMPORTER_H
 
@@ -74,19 +74,16 @@ struct MetricInfo {
         Max
     };
 
-    std::string m_stringValue;
-    float m_floatValue;
-    int m_intValue;
+    std::string m_stringValue{};
+    float m_floatValue{0.0f};
+    int m_intValue{-1};
 
-    MetricInfo()
-    : m_stringValue( "" )
-    , m_floatValue( 0.0f )
-    , m_intValue( -1 ) {
-        // empty
-    }
+    MetricInfo() = default;
+    ~MetricInfo() = default;
 };
 
-/** @brief  This class is used to implement the OpenGEX importer
+/** 
+ * @brief  This class is used to implement the OpenGEX importer
  *
  *  See http://opengex.org/OpenGEX.pdf for spec.
  */
@@ -96,21 +93,15 @@ public:
     OpenGEXImporter();
 
     /// The class destructor.
-    virtual ~OpenGEXImporter();
+    ~OpenGEXImporter() override = default;
 
     /// BaseImporter override.
-    virtual bool CanRead( const std::string &file, IOSystem *pIOHandler, bool checkSig ) const;
-
-    /// BaseImporter override.
-    virtual void InternReadFile( const std::string &file, aiScene *pScene, IOSystem *pIOHandler );
-
-    /// BaseImporter override.
-    virtual const aiImporterDesc *GetInfo() const;
-
-    /// BaseImporter override.
-    virtual void SetupProperties( const Importer *pImp );
+    bool CanRead( const std::string &file, IOSystem *pIOHandler, bool checkSig ) const override;
 
 protected:
+    void InternReadFile( const std::string &file, aiScene *pScene, IOSystem *pIOHandler ) override;
+    const aiImporterDesc *GetInfo() const override;
+    void SetupProperties( const Importer *pImp ) override;
     void handleNodes( ODDLParser::DDLNode *node, aiScene *pScene );
     void handleMetricNode( ODDLParser::DDLNode *node, aiScene *pScene );
     void handleNameNode( ODDLParser::DDLNode *node, aiScene *pScene );
@@ -145,13 +136,13 @@ protected:
 private:
     struct VertexContainer {
         std::vector<aiVector3D> m_vertices;
-        size_t m_numColors;
-        aiColor4D *m_colors;
-        std::vector<aiVector3D> m_normals;
-        size_t m_numUVComps[ AI_MAX_NUMBER_OF_TEXTURECOORDS ];
-        aiVector3D *m_textureCoords[ AI_MAX_NUMBER_OF_TEXTURECOORDS ];
+        size_t m_numColors{0};
+        aiColor4D *m_colors{nullptr};
+        std::vector<aiVector3D> m_normals{};
+        size_t m_numUVComps[AI_MAX_NUMBER_OF_TEXTURECOORDS]{};
+        aiVector3D *m_textureCoords[AI_MAX_NUMBER_OF_TEXTURECOORDS]{};
 
-        VertexContainer();
+        VertexContainer() = default;
         ~VertexContainer();
 
         VertexContainer( const VertexContainer & ) = delete;
@@ -169,22 +160,22 @@ private:
         std::vector<std::string> m_Names;
 
         RefInfo( aiNode *node, Type type, std::vector<std::string> &names );
-        ~RefInfo();
+        ~RefInfo() = default;
 
         RefInfo( const RefInfo & ) = delete;
         RefInfo &operator = ( const RefInfo & ) = delete;
     };
 
     struct ChildInfo {
-        typedef std::list<aiNode*> NodeList;
+        using NodeList = std::list<aiNode*>;
         std::list<aiNode*> m_children;
     };
     ChildInfo *m_root;
-    typedef std::map<aiNode*, std::unique_ptr<ChildInfo> > NodeChildMap;
+    using NodeChildMap = std::map<aiNode*, std::unique_ptr<ChildInfo> >;
     NodeChildMap m_nodeChildMap;
 
     std::vector<std::unique_ptr<aiMesh> > m_meshCache;
-    typedef std::map<std::string, size_t> ReferenceMap;
+    using ReferenceMap = std::map<std::string, size_t>;
     std::map<std::string, size_t> m_mesh2refMap;
     std::map<std::string, size_t> m_material2refMap;
 

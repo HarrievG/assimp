@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -43,10 +43,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef ASSIMP_BUILD_NO_MDL_IMPORTER
 
-// internal headers
 #include "MDLDefaultColorMap.h"
 #include "MDLLoader.h"
-#include <assimp/Defines.h>
+
 #include <assimp/StringUtils.h>
 #include <assimp/qnan.h>
 #include <assimp/scene.h>
@@ -54,11 +53,44 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/IOSystem.hpp>
 
+#include <cstring>
 #include <memory>
 
 using namespace Assimp;
 
 static aiTexel *const bad_texel = reinterpret_cast<aiTexel *>(SIZE_MAX);
+
+// ------------------------------------------------------------------------------------------------
+static size_t ExternalTexturePathLength(const unsigned char *current, const unsigned char *end) {
+    if (current >= end) {
+        throw DeadlyImportError("Invalid MDL file. External texture path is not null-terminated.");
+    }
+
+    const auto *terminator = static_cast<const unsigned char *>(
+            std::memchr(current, '\0', static_cast<size_t>(end - current)));
+    if (terminator == nullptr) {
+        throw DeadlyImportError("Invalid MDL file. External texture path is not null-terminated.");
+    }
+
+    return static_cast<size_t>(terminator - current);
+}
+
+// ------------------------------------------------------------------------------------------------
+static const unsigned char *SkipAsciiEffect(const unsigned char *current, const unsigned char *end) {
+    const auto remainingBytes = static_cast<size_t>(end - current);
+    if (remainingBytes < sizeof(int32_t)) {
+        throw DeadlyImportError("Invalid MDL file. The file is too small or contains invalid data.");
+    }
+
+    int32_t length = 0;
+    ::memcpy(&length, current, sizeof(int32_t));
+    AI_SWAP4(length);
+    if (length < 0 || static_cast<size_t>(length) > remainingBytes - sizeof(int32_t)) {
+        throw DeadlyImportError("Invalid MDL file. The file is too small or contains invalid data.");
+    }
+
+    return current + sizeof(int32_t) + static_cast<size_t>(length);
+}
 
 // ------------------------------------------------------------------------------------------------
 // Find a suitable palette file or take the default one
@@ -124,15 +156,20 @@ aiColor4D MDLImporter::ReplaceTextureWithColor(const aiTexture *pcTexture) {
 // Read a texture from a MDL3 file
 void MDLImporter::CreateTextureARGB8_3DGS_MDL3(const unsigned char *szData) {
     const MDL::Header *pcHeader = (const MDL::Header *)mBuffer; //the endianness is already corrected in the InternReadFile_3DGS_MDL345 function
-
-    VALIDATE_FILE_SIZE(szData + pcHeader->skinwidth *
-                                        pcHeader->skinheight);
+    if (pcHeader->skinwidth <= 0 || pcHeader->skinheight <= 0) {
+        throw DeadlyImportError("Invalid MDL3 file. Skin dimensions must be positive.");
+    }
+    const size_t len = (size_t)pcHeader->skinwidth * (size_t)pcHeader->skinheight;
+    VALIDATE_FILE_SIZE(szData + len);
 
     // allocate a new texture object
     aiTexture *pcNew = new aiTexture();
-    pcNew->mWidth = pcHeader->skinwidth;
-    pcNew->mHeight = pcHeader->skinheight;
+    pcNew->mWidth = (unsigned int)pcHeader->skinwidth;
+    pcNew->mHeight = (unsigned int)pcHeader->skinheight;
 
+    if (len > AI_MAX_ALLOC(aiTexel)) {
+        throw DeadlyImportError("Invalid MDL3 file. Texture allocation would exceed resource limit.");
+    }
     pcNew->pcData = new aiTexel[pcNew->mWidth * pcNew->mHeight];
 
     const unsigned char *szColorMap;
@@ -208,6 +245,8 @@ void MDLImporter::CreateTexture_3DGS_MDL4(const unsigned char *szData,
     return;
 }
 
+static const uint32_t MaxTextureSize = 4096;
+
 // ------------------------------------------------------------------------------------------------
 // Load color data of a texture and convert it to our output format
 void MDLImporter::ParseTextureColorData(const unsigned char *szData,
@@ -218,6 +257,22 @@ void MDLImporter::ParseTextureColorData(const unsigned char *szData,
 
     // allocate storage for the texture image
     if (do_read) {
+        // a zero-height texture must be a compressed blob of mWidth bytes,
+        // but this path produces an mWidth*mHeight pixel array - the
+        // resulting object would violate the aiTexture contract and read
+        // out of bounds when the scene is copied (e.g. on export)
+        if (pcNew->mHeight == 0 && pcNew->mWidth != 0) {
+            throw DeadlyImportError("Invalid MDL file. A texture has zero height.");
+        }
+
+        // check for max texture sizes
+        if (pcNew->mWidth > MaxTextureSize || pcNew->mHeight > MaxTextureSize) {
+            throw DeadlyImportError("Invalid MDL file. A texture is too big.");
+        }
+
+        if(pcNew->mWidth != 0 && pcNew->mHeight > UINT_MAX/pcNew->mWidth) {
+            throw DeadlyImportError("Invalid MDL file. A texture is too big.");
+        }
         pcNew->pcData = new aiTexel[pcNew->mWidth * pcNew->mHeight];
     }
 
@@ -388,7 +443,7 @@ void MDLImporter::CreateTexture_3DGS_MDL5(const unsigned char *szData,
     // this should not occur - at least the docs say it shouldn't.
     // however, one can easily try out what MED does if you have
     // a model with a DDS texture and export it to MDL5 ...
-    // yeah, it embedds the DDS file.
+    // yeah, it embeds the DDS file.
     if (6 == iType) {
         // this is a compressed texture in DDS format
         *piSkip = pcNew->mWidth;
@@ -444,6 +499,9 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
         unsigned int iWidth,
         unsigned int iHeight) {
     std::unique_ptr<aiTexture> pcNew;
+    if (szCurrent == nullptr) {
+        return;
+    }
 
     // get the type of the skin
     unsigned int iMasked = (unsigned int)(iType & 0xF);
@@ -458,8 +516,12 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
             ASSIMP_LOG_WARN("Found a reference to an embedded DDS texture, "
                             "but texture height is not equal to 1, which is not supported by MED");
         }
+        if (iWidth == 0) {
+            ASSIMP_LOG_ERROR("Found a reference to an embedded DDS texture, but texture width is zero, aborting import.");
+            return;
+        }
 
-        pcNew.reset(new aiTexture());
+        pcNew.reset(new aiTexture);
         pcNew->mHeight = 0;
         pcNew->mWidth = iWidth;
 
@@ -468,6 +530,8 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
         pcNew->achFormatHint[1] = 'd';
         pcNew->achFormatHint[2] = 's';
         pcNew->achFormatHint[3] = '\0';
+
+        SizeCheck(szCurrent + pcNew->mWidth);
 
         pcNew->pcData = (aiTexel *)new unsigned char[pcNew->mWidth];
         memcpy(pcNew->pcData, szCurrent, pcNew->mWidth);
@@ -480,13 +544,13 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
         }
 
         aiString szFile;
-        const size_t iLen = strlen((const char *)szCurrent);
-        size_t iLen2 = iLen + 1;
-        iLen2 = iLen2 > MAXLEN ? MAXLEN : iLen2;
+        const size_t iLen = ExternalTexturePathLength(szCurrent, this->mBuffer + this->iFileSize);
+        size_t iLen2 = iLen > (AI_MAXLEN - 1) ? (AI_MAXLEN - 1) : iLen;
         memcpy(szFile.data, (const char *)szCurrent, iLen2);
-        szFile.length = (ai_uint32)iLen;
+        szFile.data[iLen2] = '\0';
+        szFile.length = static_cast<ai_uint32>(iLen2);
 
-        szCurrent += iLen2;
+        szCurrent += iLen + 1;
 
         // place this as diffuse texture
         pcMatOut->AddProperty(&szFile, AI_MATKEY_TEXTURE_DIFFUSE(0));
@@ -525,7 +589,7 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
     }
 
     // sometimes there are MDL7 files which have a monochrome
-    // texture instead of material colors ... posssible they have
+    // texture instead of material colors ... possible they have
     // been converted to MDL7 from other formats, such as MDL5
     aiColor4D clrTexture;
     if (pcNew)
@@ -597,7 +661,7 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
         if (is_not_qnan(clrTexture.r)) {
             clrTemp.r *= clrTexture.a;
         }
-        pcMatOut->AddProperty<ai_real>(&clrTemp.r, 1, AI_MATKEY_OPACITY);
+        pcMatOut->AddProperty<float>(&clrTemp.r, 1, AI_MATKEY_OPACITY);
 
         // read phong power
         int iShadingMode = (int)aiShadingMode_Gouraud;
@@ -623,10 +687,7 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
     // we can simply ignore it ...
     if (iType & AI_MDL7_SKINTYPE_MATERIAL_ASCDEF) {
         VALIDATE_FILE_SIZE(szCurrent);
-        int32_t iMe = *((int32_t *)szCurrent);
-        AI_SWAP4(iMe);
-        szCurrent += sizeof(char) * iMe + sizeof(int32_t);
-        VALIDATE_FILE_SIZE(szCurrent);
+        szCurrent = SkipAsciiEffect(szCurrent, this->mBuffer + this->iFileSize);
     }
 
     // If an embedded texture has been loaded setup the corresponding
@@ -679,7 +740,7 @@ void MDLImporter::SkipSkinLump_3DGS_MDL7(
         szCurrent += iWidth;
     }
     if (0x7 == iMasked) {
-        const size_t iLen = std::strlen((const char *)szCurrent);
+        const size_t iLen = ExternalTexturePathLength(szCurrent, this->mBuffer + this->iFileSize);
         szCurrent += iLen + 1;
     } else if (iMasked || !iType) {
         if (iMasked || !iType || (iType && iWidth && iHeight)) {
@@ -691,7 +752,14 @@ void MDLImporter::SkipSkinLump_3DGS_MDL7(
             tex.pcData = bad_texel;
             tex.mHeight = iHeight;
             tex.mWidth = iWidth;
-            ParseTextureColorData(szCurrent, iMasked, &iSkip, &tex);
+
+            try {
+                ParseTextureColorData(szCurrent, iMasked, &iSkip, &tex);
+            } catch (...) {
+                // FIX: Important, otherwise the destructor will crash
+                tex.pcData = nullptr;
+                throw;
+            }
 
             // FIX: Important, otherwise the destructor will crash
             tex.pcData = nullptr;
@@ -710,9 +778,8 @@ void MDLImporter::SkipSkinLump_3DGS_MDL7(
     // if an ASCII effect description (HLSL?) is contained in the file,
     // we can simply ignore it ...
     if (iType & AI_MDL7_SKINTYPE_MATERIAL_ASCDEF) {
-        int32_t iMe = *((int32_t *)szCurrent);
-        AI_SWAP4(iMe);
-        szCurrent += sizeof(char) * iMe + sizeof(int32_t);
+        VALIDATE_FILE_SIZE(szCurrent);
+        szCurrent = SkipAsciiEffect(szCurrent, this->mBuffer + this->iFileSize);
     }
     *szCurrentOut = szCurrent;
 }

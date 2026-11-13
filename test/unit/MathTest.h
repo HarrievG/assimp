@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 
 
@@ -50,7 +50,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace Assimp {
 
-/** Custom test class providing several math related utilities. */
+/**
+ * @brief Custom test class providing some math related utilities.
+ */
 class AssimpMathTest : public ::testing::Test {
 public:
     /** Return a random non-null 2D vector. */

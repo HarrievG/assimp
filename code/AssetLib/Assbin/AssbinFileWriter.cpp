@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -43,22 +43,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "AssbinFileWriter.h"
-
 #include "Common/assbin_chunks.h"
 #include "PostProcessing/ProcessHelper.h"
 
 #include <assimp/Exceptional.h>
 #include <assimp/version.h>
-#include <assimp/Exporter.hpp>
 #include <assimp/IOStream.hpp>
 
-#ifdef ASSIMP_BUILD_NO_OWN_ZLIB
-#include <zlib.h>
-#else
-#include "../contrib/zlib/zlib.h"
-#endif
+#include "zlib.h"
 
-#include <time.h>
+#include <ctime>
 
 #if _MSC_VER
 #pragma warning(push)
@@ -132,7 +126,7 @@ inline size_t Write<double>(IOStream *stream, const double &f) {
 // Serialize a vec3
 template <>
 inline size_t Write<aiVector3D>(IOStream *stream, const aiVector3D &v) {
-    size_t t = Write<float>(stream, v.x);
+    size_t t = Write<ai_real>(stream, v.x);
     t += Write<float>(stream, v.y);
     t += Write<float>(stream, v.z);
 
@@ -143,7 +137,7 @@ inline size_t Write<aiVector3D>(IOStream *stream, const aiVector3D &v) {
 // Serialize a color value
 template <>
 inline size_t Write<aiColor3D>(IOStream *stream, const aiColor3D &v) {
-    size_t t = Write<float>(stream, v.r);
+    size_t t = Write<ai_real>(stream, v.r);
     t += Write<float>(stream, v.g);
     t += Write<float>(stream, v.b);
 
@@ -154,7 +148,7 @@ inline size_t Write<aiColor3D>(IOStream *stream, const aiColor3D &v) {
 // Serialize a color value
 template <>
 inline size_t Write<aiColor4D>(IOStream *stream, const aiColor4D &v) {
-    size_t t = Write<float>(stream, v.r);
+    size_t t = Write<ai_real>(stream, v.r);
     t += Write<float>(stream, v.g);
     t += Write<float>(stream, v.b);
     t += Write<float>(stream, v.a);
@@ -166,13 +160,13 @@ inline size_t Write<aiColor4D>(IOStream *stream, const aiColor4D &v) {
 // Serialize a quaternion
 template <>
 inline size_t Write<aiQuaternion>(IOStream *stream, const aiQuaternion &v) {
-    size_t t = Write<float>(stream, v.w);
+    size_t t = Write<ai_real>(stream, v.w);
     t += Write<float>(stream, v.x);
     t += Write<float>(stream, v.y);
     t += Write<float>(stream, v.z);
     ai_assert(t == 16);
 
-    return 16;
+    return t;
 }
 
 // -----------------------------------------------------------------------------------
@@ -184,17 +178,19 @@ inline size_t Write<aiVertexWeight>(IOStream *stream, const aiVertexWeight &v) {
     return t + Write<float>(stream, v.mWeight);
 }
 
+constexpr size_t MatrixSize = 64;
+
 // -----------------------------------------------------------------------------------
 // Serialize a mat4x4
 template <>
 inline size_t Write<aiMatrix4x4>(IOStream *stream, const aiMatrix4x4 &m) {
     for (unsigned int i = 0; i < 4; ++i) {
         for (unsigned int i2 = 0; i2 < 4; ++i2) {
-            Write<float>(stream, m[i][i2]);
+            Write<ai_real>(stream, m[i][i2]);
         }
     }
 
-    return 64;
+    return MatrixSize;
 }
 
 // -----------------------------------------------------------------------------------
@@ -243,12 +239,60 @@ inline size_t WriteArray(IOStream *stream, const T *in, unsigned int size) {
  *  and the chunk contents to the container stream. This allows relatively easy chunk
  *  chunk construction, even recursively.
  */
-class AssbinChunkWriter : public IOStream {
-private:
-    uint8_t *buffer;
-    uint32_t magic;
-    IOStream *container;
-    size_t cur_size, cursor, initial;
+class AssbinChunkWriter final : public IOStream {
+public:
+    AssbinChunkWriter(IOStream *container, uint32_t magic, size_t initial = 4096) :
+            buffer(nullptr),
+            magic(magic),
+            container(container),
+            cur_size(0),
+            cursor(0),
+            initial(initial) {
+        // empty
+    }
+
+    ~AssbinChunkWriter() override {
+        if (container) {
+            container->Write(&magic, sizeof(uint32_t), 1);
+            container->Write(&cursor, sizeof(uint32_t), 1);
+            container->Write(buffer, 1, cursor);
+        }
+        if (buffer) delete[] buffer;
+    }
+
+    void *GetBufferPointer() { return buffer; }
+
+    size_t Read(void * /*pvBuffer*/, size_t /*pSize*/, size_t /*pCount*/) override {
+        return 0;
+    }
+
+    aiReturn Seek(size_t /*pOffset*/, aiOrigin /*pOrigin*/) override {
+        return aiReturn_FAILURE;
+    }
+
+    size_t Tell() const override {
+        return cursor;
+    }
+
+    void Flush() override {
+        // not implemented
+    }
+
+    size_t FileSize() const override {
+        return cursor;
+    }
+
+    size_t Write(const void *pvBuffer, size_t pSize, size_t pCount) override {
+        pSize *= pCount;
+        if (cursor + pSize > cur_size) {
+            Grow(cursor + pSize);
+        }
+
+        memcpy(buffer + cursor, pvBuffer, pSize);
+        cursor += pSize;
+
+        return pCount;
+    }
 
 private:
     // -------------------------------------------------------------------
@@ -266,58 +310,11 @@ private:
         cur_size = new_size;
     }
 
-public:
-    AssbinChunkWriter(IOStream *container, uint32_t magic, size_t initial = 4096) :
-            buffer(nullptr),
-            magic(magic),
-            container(container),
-            cur_size(0),
-            cursor(0),
-            initial(initial) {
-        // empty
-    }
-
-    virtual ~AssbinChunkWriter() {
-        if (container) {
-            container->Write(&magic, sizeof(uint32_t), 1);
-            container->Write(&cursor, sizeof(uint32_t), 1);
-            container->Write(buffer, 1, cursor);
-        }
-        if (buffer) delete[] buffer;
-    }
-
-    void *GetBufferPointer() { return buffer; }
-
-    // -------------------------------------------------------------------
-    virtual size_t Read(void * /*pvBuffer*/, size_t /*pSize*/, size_t /*pCount*/) {
-        return 0;
-    }
-    virtual aiReturn Seek(size_t /*pOffset*/, aiOrigin /*pOrigin*/) {
-        return aiReturn_FAILURE;
-    }
-    virtual size_t Tell() const {
-        return cursor;
-    }
-    virtual void Flush() {
-        // not implemented
-    }
-
-    virtual size_t FileSize() const {
-        return cursor;
-    }
-
-    // -------------------------------------------------------------------
-    virtual size_t Write(const void *pvBuffer, size_t pSize, size_t pCount) {
-        pSize *= pCount;
-        if (cursor + pSize > cur_size) {
-            Grow(cursor + pSize);
-        }
-
-        memcpy(buffer + cursor, pvBuffer, pSize);
-        cursor += pSize;
-
-        return pCount;
-    }
+private:
+    uint8_t *buffer;
+    uint32_t magic;
+    IOStream *container;
+    size_t cur_size, cursor, initial;
 };
 
 // ----------------------------------------------------------------------------------
@@ -640,6 +637,10 @@ protected:
 
         Write<aiString>(&chunk, l->mName);
         Write<unsigned int>(&chunk, l->mType);
+
+        Write<aiVector3D>(&chunk, l->mPosition);
+        Write<aiVector3D>(&chunk, l->mDirection);
+        Write<aiVector3D>(&chunk, l->mUp);
 
         if (l->mType != aiLightSource_DIRECTIONAL) {
             Write<float>(&chunk, l->mAttenuationConstant);

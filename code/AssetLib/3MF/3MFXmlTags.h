@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2021, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -40,67 +40,83 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #pragma once
 
-namespace Assimp {
-namespace D3MF {
+namespace Assimp::D3MF::XmlTag {
+    // Root tag
+    constexpr char RootTag[] = "3MF";
 
-namespace XmlTag {
     // Meta-data
-    static const std::string meta = "metadata";
-    static const std::string meta_name = "name";
+    constexpr char meta[] = "metadata";
+    constexpr char meta_name[] = "name";
 
     // Model-data specific tags
-    static const std::string model = "model";
-    static const std::string model_unit = "unit";
-    static const std::string metadata = "metadata";
-    static const std::string resources = "resources";
-    static const std::string object = "object";
-    static const std::string mesh = "mesh";
-    static const std::string components = "components";
-    static const std::string component = "component";
-    static const std::string vertices = "vertices";
-    static const std::string vertex = "vertex";
-    static const std::string triangles = "triangles";
-    static const std::string triangle = "triangle";
-    static const std::string x = "x";
-    static const std::string y = "y";
-    static const std::string z = "z";
-    static const std::string v1 = "v1";
-    static const std::string v2 = "v2";
-    static const std::string v3 = "v3";
-    static const std::string id = "id";
-    static const std::string pid = "pid";
-    static const std::string pindex = "pindex";
-    static const std::string p1 = "p1";
-    static const std::string name = "name";
-    static const std::string type = "type";
-    static const std::string build = "build";
-    static const std::string item = "item";
-    static const std::string objectid = "objectid";
-    static const std::string transform = "transform";
+    constexpr char model[] = "model";
+    constexpr char model_unit[] = "unit";
+    constexpr char metadata[] = "metadata";
+    constexpr char resources[] = "resources";
+    constexpr char object[] = "object";
+    constexpr char mesh[] = "mesh";
+    constexpr char components[] = "components";
+    constexpr char component[] = "component";
+    constexpr char vertices[] = "vertices";
+    constexpr char vertex[] = "vertex";
+    constexpr char triangles[] = "triangles";
+    constexpr char triangle[] = "triangle";
+    constexpr char x[] = "x";
+    constexpr char y[] = "y";
+    constexpr char z[] = "z";
+    constexpr char v1[] = "v1";
+    constexpr char v2[] = "v2";
+    constexpr char v3[] = "v3";
+    constexpr char id[] = "id";
+    constexpr char pid[] = "pid";
+    constexpr char pindex[] = "pindex";
+    constexpr char p1[] = "p1";
+    constexpr char p2[] = "p2";
+    constexpr char p3[] = "p3";
+    constexpr char name[] = "name";
+    constexpr char type[] = "type";
+    constexpr char build[] = "build";
+    constexpr char item[] = "item";
+    constexpr char objectid[] = "objectid";
+    constexpr char transform[] = "transform";
+    constexpr char path[] = "path";
+
+    // Production extension (namespace prefix "p" by convention)
+    constexpr char p_path[] = "p:path";
 
     // Material definitions
-    static const std::string basematerials = "basematerials";
-    static const std::string basematerials_id = "id";
-    static const std::string basematerials_base = "base";
-    static const std::string basematerials_name = "name";
-    static const std::string basematerials_displaycolor = "displaycolor";
+    constexpr char basematerials[] = "basematerials";
+    constexpr char basematerials_base[] = "base";
+    constexpr char basematerials_name[] = "name";
+    constexpr char basematerials_displaycolor[] = "displaycolor";
+    constexpr char texture_2d[] = "m:texture2d";
+    constexpr char texture_group[] = "m:texture2dgroup";
+    constexpr char texture_content_type[] = "contenttype";
+    constexpr char texture_tilestyleu[] = "tilestyleu";
+    constexpr char texture_tilestylev[] = "tilestylev";
+    constexpr char texture_2d_coord[] = "m:tex2coord";
+    constexpr char texture_cuurd_u[] = "u";
+    constexpr char texture_cuurd_v[] = "v";
+
+    // vertex color definitions
+    constexpr char colorgroup[] = "m:colorgroup";
+    constexpr char color_item[] = "m:color";
+    constexpr char color_value[] = "color";
 
     // Meta info tags
-    static const std::string CONTENT_TYPES_ARCHIVE = "[Content_Types].xml";
-    static const std::string ROOT_RELATIONSHIPS_ARCHIVE = "_rels/.rels";
-    static const std::string SCHEMA_CONTENTTYPES = "http://schemas.openxmlformats.org/package/2006/content-types";
-    static const std::string SCHEMA_RELATIONSHIPS = "http://schemas.openxmlformats.org/package/2006/relationships";
-    static const std::string RELS_RELATIONSHIP_CONTAINER = "Relationships";
-    static const std::string RELS_RELATIONSHIP_NODE = "Relationship";
-    static const std::string RELS_ATTRIB_TARGET = "Target";
-    static const std::string RELS_ATTRIB_TYPE = "Type";
-    static const std::string RELS_ATTRIB_ID = "Id";
-    static const std::string PACKAGE_START_PART_RELATIONSHIP_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
-    static const std::string PACKAGE_PRINT_TICKET_RELATIONSHIP_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/printticket";
-    static const std::string PACKAGE_TEXTURE_RELATIONSHIP_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture";
-    static const std::string PACKAGE_CORE_PROPERTIES_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties";
-    static const std::string PACKAGE_THUMBNAIL_RELATIONSHIP_TYPE = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
-}
+    constexpr char CONTENT_TYPES_ARCHIVE[] = "[Content_Types].xml";
+    constexpr char ROOT_RELATIONSHIPS_ARCHIVE[] = "_rels/.rels";
+    constexpr char SCHEMA_CONTENTTYPES[] = "http://schemas.openxmlformats.org/package/2006/content-types";
+    constexpr char SCHEMA_RELATIONSHIPS[] = "http://schemas.openxmlformats.org/package/2006/relationships";
+    constexpr char RELS_RELATIONSHIP_CONTAINER[] = "Relationships";
+    constexpr char RELS_RELATIONSHIP_NODE[] = "Relationship";
+    constexpr char RELS_ATTRIB_TARGET[] = "Target";
+    constexpr char RELS_ATTRIB_TYPE[] = "Type";
+    constexpr char RELS_ATTRIB_ID[] = "Id";
+    constexpr char PACKAGE_START_PART_RELATIONSHIP_TYPE[] = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
+    constexpr char PACKAGE_PRINT_TICKET_RELATIONSHIP_TYPE[] = "http://schemas.microsoft.com/3dmanufacturing/2013/01/printticket";
+    constexpr char PACKAGE_TEXTURE_RELATIONSHIP_TYPE[] = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture";
+    constexpr char PACKAGE_CORE_PROPERTIES_RELATIONSHIP_TYPE[] = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties";
+    constexpr char PACKAGE_THUMBNAIL_RELATIONSHIP_TYPE[] = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
 
-} // Namespace D3MF
-} // Namespace Assimp
+} // namespace Assimp::D3MF
